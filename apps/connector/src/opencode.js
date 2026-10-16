@@ -22,6 +22,7 @@ export class LocalOpenCode {
     this.done=new Set();
     this.finishing=new Set();
     this.busySeen=new Set();
+    this.pollGenerations=new Map();
     this.pollIntervalMs=3000;
   }
   auth(){return 'Basic '+Buffer.from(`${this.username}:${this.password}`).toString('base64');}
@@ -52,6 +53,11 @@ export class LocalOpenCode {
   }
   async ready(){const result=await this.call('/global/health');if(!result?.healthy)throw new Error('OpenCode non pronto');}
   async command(method,p){
+    if(method==='diagnostics'){
+      const health=await this.call('/global/health');
+      return {healthy:!!health?.healthy,version:String(health?.version||'non disponibile'),
+        workdir:this.workdir,port:this.port};
+    }
     if(method==='restore-sessions'){
       if(!Array.isArray(p.sessions)||p.sessions.length>100)throw new Error('Batch di sessioni non valido');
       for(const s of p.sessions){
@@ -69,12 +75,22 @@ export class LocalOpenCode {
     if(!p.sessionId || !p.chatId)throw new Error('Sessione mancante');
     this.sessionToChat.set(p.sessionId,p.chatId);
     const id=encodeURIComponent(p.sessionId);
+    if(method==='delete-session'){
+      await this.call(`/session/${id}`,'DELETE');
+      this.sessionToChat.delete(p.sessionId);
+      this.done.delete(p.sessionId);
+      this.busySeen.delete(p.sessionId);
+      this.pollGenerations.delete(p.sessionId);
+      return {ok:true};
+    }
     if(method==='recover'){
       // Al ricollegamento nessun prompt viene inviato una seconda volta.
       const statuses=await this.call('/session/status');
       const busy=statuses?.[p.sessionId]?.type==='busy';
       const messages=await this.call(`/session/${id}/message`);
-      const completed=!busy && Array.isArray(messages) && messages.some(m=>m.info?.role==='assistant' && m.info?.time?.completed);
+      // Non interpretare una vecchia risposta assistant come esito del job
+      // pendente: senza una correlazione certa la consegna resta irrisolta.
+      const completed=false;
       this.emit({type:'messages',chatId:p.chatId,sessionId:p.sessionId,messages,done:completed});
       if(busy){
         this.busySeen.add(p.sessionId);
@@ -83,14 +99,21 @@ export class LocalOpenCode {
       return {running:busy,completed,unresolved:!busy&&!completed};
     }
     if(method==='prompt'){
-      // L'endpoint ritorna subito; l'output arriverà dagli eventi SSE.
+      if(typeof p.text!=='string'||!p.text.trim()||p.text.length>12000)throw new Error('Prompt non valido');
+      // Memorizziamo gli ID assistant preesistenti: la mancanza di una fase
+      // busy osservabile non deve bloccare per sempre le risposte rapide.
+      const before=await this.call(`/session/${id}/message`);
+      if(!Array.isArray(before))throw new Error('Cronologia OpenCode non valida');
+      const baseline=new Set(before.filter(m=>m.info?.role==='assistant').map(m=>m.info?.id).filter(Boolean));
+      const generation=(this.pollGenerations.get(p.sessionId)||0)+1;
+      this.pollGenerations.set(p.sessionId,generation);
       this.done.delete(p.sessionId);
       this.busySeen.delete(p.sessionId);
       await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}]});
-      this.pollUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Fallback sync:',err.message));
+      this.pollUntilIdle(p.sessionId,p.chatId,baseline,generation).catch(err=>console.error('Fallback sync:',err.message));
       return {accepted:true};
     }
-    if(method==='abort'){await this.call(`/session/${id}/abort`,'POST');await this.sync(p.sessionId,p.chatId,true);return {ok:true};}
+    if(method==='abort'){await this.call(`/session/${id}/abort`,'POST');this.pollGenerations.delete(p.sessionId);await this.sync(p.sessionId,p.chatId,true);return {ok:true};}
     if(method==='sync'){await this.sync(p.sessionId,p.chatId,false);return {ok:true};}
     if(method==='permission-reply'){
       if(!['once','reject'].includes(p.decision))throw new Error('Scelta permesso non valida');
@@ -118,9 +141,10 @@ export class LocalOpenCode {
       this.done.add(sessionId);
     }finally{this.finishing.delete(sessionId);}
   }
-  async pollUntilIdle(sessionId,chatId){
+  async pollUntilIdle(sessionId,chatId,baseline=null,generation=null){
     // Recupero di sicurezza quando una notifica SSE si perde.
     for(let attempt=0;attempt<120 && !this.done.has(sessionId);attempt++){
+      if(generation!==null && this.pollGenerations.get(sessionId)!==generation)break;
       await new Promise(r=>setTimeout(r,this.pollIntervalMs));
       try{
         const statuses=await this.call('/session/status');
@@ -128,7 +152,20 @@ export class LocalOpenCode {
         if(status==='busy')this.busySeen.add(sessionId);
         // L'API può omettere le sessioni inattive: richiedi prima una prova di busy.
         if(status==='idle'||(this.busySeen.has(sessionId)&&!status)){
+          if(baseline){
+            const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
+            const answered=Array.isArray(messages)&&messages.some(m=>
+              m.info?.role==='assistant' && m.info?.id && !baseline.has(m.info.id) && m.info?.time?.completed);
+            if(!answered)continue;
+          }
           await this.finish(sessionId);break;
+        }
+        // Alcuni server non emettono mai busy per prompt rapidissimi.
+        if(!status&&baseline){
+          const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
+          const answered=Array.isArray(messages)&&messages.some(m=>
+            m.info?.role==='assistant'&&m.info?.id&&!baseline.has(m.info.id)&&m.info?.time?.completed);
+          if(answered){await this.finish(sessionId);break;}
         }
       }catch(err){if(attempt%10===0)console.error('Polling OpenCode:',err.message);}
     }

@@ -47,6 +47,28 @@ api.post('/admin/users',requireUser,requireAdmin,route(async(req,res)=>{
   res.status(201).json({user:await createUser(username,password,role)});
 }));
 
+// La disattivazione revoca sia le sessioni browser sia il canale dei PC dell'utente.
+api.patch('/admin/users/:id/status',requireUser,requireAdmin,route(async(req,res)=>{
+  const active=req.body?.active;
+  if(typeof active!=='boolean')return res.status(400).json({error:'Stato non valido'});
+  if(req.params.id===req.user.id && !active)return res.status(400).json({error:'Non puoi disattivare il tuo account'});
+  const target=await one('SELECT id,role,active FROM users WHERE id=?',[req.params.id]);
+  if(!target)return res.status(404).json({error:'Utente non trovato'});
+  // Evita la disattivazione dell'ultimo amministratore attivo.
+  if(!active && target.role==='admin' && Number(target.active)===1){
+    const remaining=await one("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND active=1");
+    if(Number(remaining.n)<=1)return res.status(409).json({error:'È necessario almeno un amministratore attivo'});
+  }
+  await rows('UPDATE users SET active=? WHERE id=?',[active?1:0,target.id]);
+  if(!active){
+    await rows('DELETE FROM web_sessions WHERE user_id=?',[target.id]);
+    await rows('DELETE FROM pairing_codes WHERE user_id=?',[target.id]);
+    const pcs=await rows('SELECT id FROM computers WHERE owner_id=?',[target.id]);
+    for(const pc of pcs)disconnectDevice(pc.id);
+  }
+  res.json({ok:true});
+}));
+
 api.post('/devices/pairing-code',requireUser,route(async(req,res)=>{
   const code=randomBytes(12).toString('hex');
   await rows('INSERT INTO pairing_codes(code_hash,user_id,expires_at) VALUES (?,?,?)',
@@ -73,6 +95,12 @@ api.get('/devices',requireUser,route(async(req,res)=>{
   const pcs=await rows('SELECT id,name,last_seen,created_at FROM computers WHERE owner_id=? AND revoked=0 ORDER BY created_at DESC',[req.user.id]);
   res.json({devices:pcs.map(pc=>({...pc,online:isOnline(pc.id)}))});
 }));
+api.get('/devices/:id/diagnostics',requireUser,route(async(req,res)=>{
+  const pc=await one('SELECT id FROM computers WHERE id=? AND owner_id=? AND revoked=0',[req.params.id,req.user.id]);
+  if(!pc)return res.status(404).json({error:'PC non trovato'});
+  if(!isOnline(pc.id))return res.status(409).json({error:'PC offline'});
+  res.json({diagnostics:await rpc(pc.id,'diagnostics',{},12000)});
+}));
 api.delete('/devices/:id',requireUser,route(async(req,res)=>{
   const result=await rows('UPDATE computers SET revoked=1 WHERE id=? AND owner_id=?',[req.params.id,req.user.id]);
   if(!result.affectedRows)return res.status(404).json({error:'PC non trovato'});
@@ -98,6 +126,28 @@ api.post('/chats',requireUser,route(async(req,res)=>{
   if(!session?.id)throw new Error('OpenCode non ha restituito una sessione');
   await rows('INSERT INTO chats(id,user_id,computer_id,title,session_id) VALUES (?,?,?,?,?)',[id,req.user.id,pc.id,title,session.id]);
   res.status(201).json({chat:{id,computer_id:pc.id,title,session_id:session.id}});
+}));
+api.patch('/chats/:id',requireUser,route(async(req,res)=>{
+  const chat=await ownedChat(req.user,req.params.id);
+  if(!chat)return res.status(404).json({error:'Chat non trovata'});
+  const title=String(req.body?.title||'').trim();
+  if(!title||title.length>160)return res.status(400).json({error:'Titolo non valido (1-160 caratteri)'});
+  await rows('UPDATE chats SET title=? WHERE id=?',[title,chat.id]);
+  res.json({ok:true,title});
+}));
+api.delete('/chats/:id',requireUser,route(async(req,res)=>{
+  const chat=await ownedChat(req.user,req.params.id);
+  if(!chat)return res.status(404).json({error:'Chat non trovata'});
+  const running=await one("SELECT id FROM jobs WHERE chat_id=? AND status IN ('queued','running') LIMIT 1",[chat.id]);
+  if(running)return res.status(409).json({error:'Interrompi o completa prima il lavoro in corso'});
+  if(!isOnline(chat.computer_id))return res.status(409).json({error:'Collega il PC per eliminare anche la sessione OpenCode locale'});
+  // Eliminare la sessione locale prima della copia centrale: mai presentare una chat
+  // come cancellata lasciandone intenzionalmente il contenuto sul PC.
+  await rpc(chat.computer_id,'delete-session',{chatId:chat.id,sessionId:chat.session_id});
+  await rows('DELETE FROM chats WHERE id=? AND user_id=?',[chat.id,req.user.id]);
+  active.delete(chat.id);
+  publish(chat.id,{type:'deleted'});
+  res.json({ok:true});
 }));
 api.get('/chats/:id/messages',requireUser,route(async(req,res)=>{
   const chat=await ownedChat(req.user,req.params.id);
@@ -140,10 +190,14 @@ api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
     await rows("UPDATE jobs SET status='running' WHERE id=? AND status='queued'",[jobId]);
     res.status(202).json({jobId});
   }catch(err){
-    await rows('UPDATE jobs SET status=?,error_text=? WHERE id=?',['failed',err.message,jobId]);
-    active.delete(chat.id);
-    publish(chat.id,{type:'error',message:err.message});
-    res.status(502).json({error:err.message});
+    // Dopo un timeout o una disconnessione il comando potrebbe essere già
+    // arrivato a OpenCode: non dichiararlo fallito e NON consentire un reinvio.
+    const uncertain=err.code==='DELIVERY_UNCERTAIN';
+    await rows('UPDATE jobs SET status=?,error_text=? WHERE id=?',
+      [uncertain?'running':'failed',String(err.message).slice(0,1000),jobId]);
+    if(!uncertain)active.delete(chat.id);
+    publish(chat.id,{type:'error',message:uncertain?'Stato operazione incerto: sincronizza o interrompi prima di riprovare':err.message});
+    res.status(uncertain?409:502).json({error:uncertain?'Esecuzione forse avviata: non ripetere il prompt. Sincronizza o interrompi.':err.message});
   }
 }));
 api.post('/chats/:id/abort',requireUser,route(async(req,res)=>{

@@ -31,10 +31,11 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
       if(promptStarted)statusReads += 1;
       return respond(promptStarted && statusReads===1 ? {ses_new:{type:'busy'}} : {});
     }
-    if(req.url==='/session/ses_new/message')return respond([{info:{id:'m1',role:'assistant',time:{completed:123}},parts:[{type:'text',text:'OK'}]}]);
+    if(req.url==='/session/ses_new/message')return respond([{info:{id:'m1',role:'assistant',time:{completed:123}},parts:[{type:'text',text:'Precedente'}]},...(promptStarted?[{info:{id:'m-new',role:'assistant',time:{completed:456}},parts:[{type:'text',text:'OK'}]}]:[])]);
     if(req.url==='/session/ses_saved/message')return respond([{info:{id:'m2',role:'assistant',time:{completed:1}},parts:[{type:'text',text:'Risposta salvata'}]}]);
     if(req.url==='/permission/permission1/reply' && req.method==='POST')return respond(true);
     if(req.url==='/session/ses_new/abort' && req.method==='POST')return respond(true);
+    if(req.url==='/session/ses_new' && req.method==='DELETE')return respond(true);
     respond({error:'unknown'},404);
   });
   try{
@@ -45,14 +46,16 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
     const client=new LocalOpenCode(evt=>events.push(evt));
     client.pollIntervalMs=15;
     await client.ready();
+    assert.deepEqual(await client.command('diagnostics',{}),{healthy:true,version:'test',workdir:dir,port:server.address().port});
     assert.deepEqual(await client.command('create-session',{chatId:'chat1',title:'Prova'}),{id:'ses_new'});
     assert.deepEqual(await client.command('restore-sessions',{sessions:[{chatId:'chat2',sessionId:'ses_saved'}]}),{restored:1});
     assert.equal(client.sessionToChat.get('ses_saved'),'chat2');
     await assert.rejects(()=>client.command('restore-sessions',{sessions:[{chatId:'x',sessionId:null}]}),/non valida/);
 
     const restored=await client.command('recover',{chatId:'chat2',sessionId:'ses_saved'});
-    assert.equal(restored.completed,true);
-    assert.equal(events.at(-1).done,true);
+    assert.equal(restored.completed,false,'una risposta passata non prova che il job pendente sia completato');
+    assert.equal(restored.unresolved,true);
+    assert.equal(events.at(-1).done,false);
     assert.equal(calls.filter(x=>x.includes('prompt_async')).length,0);
 
     assert.deepEqual(await client.command('prompt',{chatId:'chat1',sessionId:'ses_new',text:'Test'}),{accepted:true});
@@ -64,6 +67,48 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
     assert.ok(calls.includes('POST /permission/permission1/reply'));
     await client.command('abort',{chatId:'chat1',sessionId:'ses_new'});
     assert.ok(calls.includes('POST /session/ses_new/abort'));
+    assert.deepEqual(await client.command('delete-session',{chatId:'chat1',sessionId:'ses_new'}),{ok:true});
+    assert.ok(calls.includes('DELETE /session/ses_new'));
+    assert.equal(client.sessionToChat.has('ses_new'),false);
+  }finally{
+    await new Promise(resolve=>server.close(resolve));
+    await rm(dir,{recursive:true,force:true});
+    delete process.env.OPENCODE_PORT;
+    delete process.env.OPENCODE_WORKDIR;
+    delete process.env.OPENCODE_SERVER_PASSWORD;
+  }
+});
+
+
+test('prompt rapido senza stato busy: completa soltanto quando appare una nuova risposta', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'ocw-fast-'));
+  let prompted=false;
+  const outbound=[];
+  const server=createServer((req,res)=>{
+    res.setHeader('Content-Type','application/json');
+    if(req.url==='/session/status')return res.end('{}');
+    if(req.url==='/session/ses_fast/message')return res.end(JSON.stringify([
+      {info:{id:'assistant-old',role:'assistant',time:{completed:1}},parts:[{type:'text',text:'Vecchio testo'}]},
+      ...(prompted?[{info:{id:'assistant-new',role:'assistant',time:{completed:2}},parts:[{type:'text',text:'Nuova risposta'}]}]:[])
+    ]));
+    if(req.url==='/session/ses_fast/prompt_async'){
+      prompted=true;
+      res.writeHead(204).end();return;
+    }
+    if(req.url==='/global/health')return res.end(JSON.stringify({healthy:true}));
+    res.writeHead(404).end('{}');
+  });
+  try{
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    process.env.OPENCODE_PORT=String(server.address().port);
+    process.env.OPENCODE_WORKDIR=dir;
+    process.env.OPENCODE_SERVER_PASSWORD='very-long-password-for-tests';
+    const client=new LocalOpenCode(evt=>outbound.push(evt));
+    client.pollIntervalMs=10;
+    client.sessionToChat.set('ses_fast','chat-fast');
+    await client.command('prompt',{chatId:'chat-fast',sessionId:'ses_fast',text:'Nuovo prompt'});
+    for(let i=0;i<80 && !outbound.some(x=>x.done);i++)await pause(15);
+    assert.ok(outbound.some(x=>x.done),'la nuova risposta deve sbloccare la chat anche senza busy');
   }finally{
     await new Promise(resolve=>server.close(resolve));
     await rm(dir,{recursive:true,force:true});

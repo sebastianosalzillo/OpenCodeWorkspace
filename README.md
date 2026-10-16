@@ -1,4 +1,4 @@
-# OpenCode Workspace — MVP multiutente (v0.2)
+# OpenCode Workspace — MVP multiutente (v0.3)
 
 Piattaforma di chat multiutente con account personali e agenti OpenCode **installati sui PC Windows degli utenti**. Il server centrale autentica gli utenti e salva le chat, mentre un connettore residente su ciascun PC comunica con l'API locale di `opencode serve`.
 
@@ -115,6 +115,26 @@ Aggiorna la pagina Workspace, seleziona il PC online, crea una chat e prova con:
 `Elenca i file del progetto e spiegami quali componenti trovi. Non modificare nulla.`
 
 La cronologia testuale viene salvata nel database centrale. OpenCode conserva sul PC la propria sessione completa. Dalla testata chat puoi richiedere la sincronizzazione della cronologia in caso di disconnessione.
+
+## Novità v0.3 — gestione chat e affidabilità
+
+- **Diagnostica PC:** da **I miei PC → Diagnostica OpenCode** vengono mostrati salute, versione, porta e directory di lavoro del server OpenCode locale. Il PC deve essere online e appartenere all’utente.
+- **Rinomina ed elimina chat:** pulsanti nella barra superiore. La cancellazione richiede il PC online e prima elimina la sessione OpenCode locale, poi i relativi dati dal server. Se il PC è offline non finge di cancellare la sessione locale.
+- **Account disattivabili:** l'amministratore può disattivare/riattivare utenti. Alla disattivazione vengono revocate le sessioni web e chiuse le connessioni dei PC. Non è consentito disattivare sé stessi o l'ultimo amministratore attivo.
+- **Consegna incerta:** in caso di timeout del canale RPC il backend non considera il prompt fallito. Blocca l'invio di nuovi prompt su quella chat finché l'utente non sincronizza, verifica o interrompe la sessione. **Non reinviare manualmente lo stesso prompt senza verificare:** potrebbe aver già eseguito modifiche.
+- **Risposte rapide:** il connettore individua le risposte assistant nuove rispetto alla cronologia prima del prompt, anche se non ha osservato lo stato `busy`.
+- **Recupero prudente:** una vecchia risposta assistant non viene scambiata per la conclusione di un job pendente dopo riconnessione.
+
+### Procedura di verifica v0.3
+
+1. Connetti un PC e apri **Diagnostica OpenCode**; verifica che il risultato sia `healthy`.
+2. Avvia una chat e invia un prompt di sola lettura. Verifica che risposta e attività arrivino e siano persistenti dopo ricarica.
+3. Rinomina la chat. Prova la cancellazione quando il PC è online, poi ripeti quando è offline (deve essere impedita).
+4. Crea un secondo utente e controlla che non possa leggere le chat o i PC del primo.
+5. Disattiva il secondo utente e verifica che le sue sessioni e il connettore vengano scollegati; riattivalo e prova un nuovo login.
+6. Simula un timeout di rete durante un prompt: il backend deve segnalare esito incerto e non consentire un doppio invio. Usa sincronizzazione/interruzione prima di riprovare.
+
+**Limite noto:** il recupero dei job dopo interruzioni improvvise rimane conservativo; se non è certo che l'ultimo prompt sia concluso, potrebbe essere necessario intervenire manualmente. La build React completa richiede `npm install` e non è stata validata nell'ambiente senza accesso a npm. Per la produzione sono ancora necessari audit di sicurezza, reverse proxy HTTPS, sandbox di esecuzione e collaudo reale su Windows.
 
 ## Sicurezza: aspetti essenziali
 

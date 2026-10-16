@@ -29,11 +29,10 @@ export function rpc(deviceId,method,payload={},timeoutMs=20000) {
     const ws = devices.get(deviceId);
     if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error('Computer offline'));
     const id=randomUUID();
-    const timer=setTimeout(()=>{pending.delete(id);reject(new Error('Operazione scaduta: verificare lo stato del PC prima di riprovare'));},timeoutMs);
-    pending.set(id,{deviceId,resolve,reject,timer});
-    pending.get(id).socket=ws;
+    const timer=setTimeout(()=>{pending.delete(id);const e=new Error('Timeout RPC: consegna forse avvenuta');e.code='DELIVERY_UNCERTAIN';reject(e);},timeoutMs);
+    pending.set(id,{deviceId,resolve,reject,timer,socket:ws});
     ws.send(JSON.stringify({type:'rpc',id,method,payload}),err=>{
-      if(err){clearTimeout(timer);pending.delete(id);reject(err);}
+      if(err){clearTimeout(timer);pending.delete(id);const e=new Error('Errore trasporto: consegna forse avvenuta');e.code='DELIVERY_UNCERTAIN';reject(e);}
     });
   });
 }
@@ -45,7 +44,8 @@ export function attachAgentSockets(server) {
     try{
       const match=/^Bearer ([0-9a-f]{64})$/.exec(req.headers.authorization||'');
       if(!match) return socket.destroy();
-      const pc=await one('SELECT id,owner_id FROM computers WHERE device_token_hash=? AND revoked=0',[digest(match[1])]);
+      const pc=await one(`SELECT pc.id,pc.owner_id FROM computers pc JOIN users u ON u.id=pc.owner_id
+        WHERE pc.device_token_hash=? AND pc.revoked=0 AND u.active=1`,[digest(match[1])]);
       if(!pc)return socket.destroy();
       wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,pc));
     }catch{socket.destroy();}
@@ -59,6 +59,8 @@ export function attachAgentSockets(server) {
     rows('UPDATE computers SET last_seen=NOW() WHERE id=?',[pc.id]).catch(console.error);
     Promise.resolve().then(()=>callbacks.onDeviceConnect?.(pc)).catch(err=>console.error('Agent resume:',err.message));
     ws.on('message',async(raw)=>{
+      // Una connessione rimpiazzata non può più modificare lo stato centrale.
+      if(devices.get(pc.id)!==ws)return;
       try{
         const m=JSON.parse(raw.toString());
         if(m.type==='result'){
@@ -75,7 +77,7 @@ export function attachAgentSockets(server) {
         devices.delete(pc.id);
         Promise.resolve().then(()=>callbacks.onDeviceDisconnect?.(pc)).catch(err=>console.error('Agent disconnect:',err.message));
       }
-      for(const [id,x] of pending){if(x.socket===ws){clearTimeout(x.timer);pending.delete(id);x.reject(new Error('PC scollegato'));}}
+      for(const [id,x] of pending){if(x.socket===ws){clearTimeout(x.timer);pending.delete(id);const e=new Error('PC scollegato: consegna forse avvenuta');e.code='DELIVERY_UNCERTAIN';x.reject(e);}}
     });
   });
   const heartbeat=setInterval(()=>{
