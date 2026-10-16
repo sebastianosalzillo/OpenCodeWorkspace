@@ -200,6 +200,12 @@ export class LocalOpenCode {
           }
           await this.finish(sessionId);if(this.done.has(sessionId))break;
         }
+        // Anche dopo un riavvio, l'API può omettere lo stato busy.
+        // È sicuro tentare finish: matchingReply controlla il prompt effettivo.
+        if(!status&&this.pendingJobs.has(sessionId)){
+          await this.finish(sessionId);
+          if(this.done.has(sessionId))break;
+        }
         // Alcuni server non emettono mai busy per prompt rapidissimi.
         if(!status&&baseline){
           const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
