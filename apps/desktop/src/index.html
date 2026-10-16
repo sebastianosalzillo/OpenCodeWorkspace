@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'" />
+<title>OpenCode Workspace Connector</title><link rel="stylesheet" href="ui.css" /></head>
+<body>
+<header><div class="logo">OC</div><div><h1>OpenCode Workspace</h1><p>Connettore Windows · v0.4</p></div><span id="state" class="badge">Configurazione</span></header>
+<main>
+  <section class="hero"><h2>Collega il tuo PC a Workspace</h2><p>OpenCode esegue i comandi sul tuo computer, mentre ogni utente mantiene le proprie conversazioni sul server Workspace.</p></section>
+  <section class="panel"><div class="section-head"><h2>1. Configurazione</h2><span>Credenziali cifrate con Windows</span></div>
+    <form id="settingsForm">
+      <label>Server Workspace (HTTPS)<input id="serverUrl" type="url" placeholder="https://workspace.example.com" required /></label>
+      <div class="two"><label>Nome computer<input id="name" type="text" maxlength="100" placeholder="PC-UFFICIO" required /></label><label>Porta OpenCode<input id="port" type="number" min="1024" max="65535" value="4096" required /></label></div>
+      <label>Cartella di lavoro locale<div class="inline"><input id="workdir" type="text" placeholder="C:\\AI-Workspace" required /><button type="button" id="browse">Sfoglia</button></div></label>
+      <label>Password server OpenCode locale<input id="password" type="password" minlength="16" maxlength="256" autocomplete="new-password" placeholder="Minimo 16 caratteri" required /><small id="passHint">Non è la password del tuo account Workspace.</small></label>
+      <label class="check"><input id="startOpenCode" type="checkbox" checked /> Avvia automaticamente OpenCode insieme al connettore</label>
+      <label class="check"><input id="loginItem" type="checkbox" checked /> Avvia il connettore all'accesso a Windows (versione installata)</label>
+      <div class="actions"><button type="submit" id="save">Salva configurazione</button></div>
+    </form>
+  </section>
+  <section class="panel"><div class="section-head"><h2>2. Associa il PC</h2><span id="pairStatus">Non associato</span></div>
+    <p class="muted">Accedi alla tua interfaccia web → <b>I miei PC</b> → <b>Genera codice</b>, poi inseriscilo qui. Scade dopo dieci minuti.</p>
+    <div class="inline"><input id="pairCode" maxlength="24" placeholder="Codice temporaneo di 24 caratteri" spellcheck="false" /><button id="pair">Associa</button></div>
+    <small id="deviceId"></small>
+  </section>
+  <section class="panel"><div class="section-head"><h2>3. Connettore</h2><span id="runningState">Fermo</span></div>
+    <div class="actions"><button id="start" class="primary">Avvia</button><button id="stop">Ferma</button><button id="disconnect" class="danger">Rimuovi associazione locale</button></div>
+    <p class="muted">Per revocare definitivamente l'accesso, rimuovi anche il dispositivo dalla dashboard web.</p>
+  </section>
+  <section class="panel"><div class="section-head"><h2>Diagnostica</h2><button id="refresh">Aggiorna</button></div><pre id="logs" aria-live="polite">In attesa di configurazione.</pre></section>
+  <p id="message" role="status" aria-live="polite"></p>
+</main><script src="ui.js"></script></body></html>

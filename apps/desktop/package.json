@@ -1,0 +1,26 @@
+{
+  "name": "@workspace/desktop",
+  "private": true,
+  "version": "0.4.0",
+  "description": "OpenCode Workspace Connector for Windows",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "npm run bundle && electron .",
+    "bundle": "node scripts/build-connector.mjs",
+    "dist:win": "npm run bundle && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.2"
+  },
+  "build": {
+    "appId": "it.opencodeworkspace.connector",
+    "productName": "OpenCode Workspace Connector",
+    "asar": true,
+    "directories": {"output": "../../release/desktop"},
+    "files": ["src/**/*", "dist/connector.cjs", "assets/**/*", "package.json"],
+    "win": {"target": "nsis", "icon": "assets/icon.ico"},
+    "nsis": {"oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true}
+  }
+}

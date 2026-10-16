@@ -12,6 +12,9 @@ if(!/^https:\/\//.test(base) && !/^http:\/\/localhost(?::\d+)?$/.test(base) && !
 const directory=join(homedir(),'.opencode-workspace');
 const file=join(directory,'device.json');
 async function credentials(){
+  if(process.env.WORKSPACE_DEVICE_ID && process.env.WORKSPACE_DEVICE_TOKEN){
+    return {deviceId:process.env.WORKSPACE_DEVICE_ID,token:process.env.WORKSPACE_DEVICE_TOKEN};
+  }
   try{return JSON.parse(await readFile(file,'utf8'));}catch(err){if(err.code!=='ENOENT')throw err;}
   const code=process.env.PAIR_CODE;
   if(!code)throw new Error('PAIR_CODE mancante. Genera un codice di associazione nell’interfaccia web.');

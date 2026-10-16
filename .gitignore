@@ -10,3 +10,8 @@ coverage/
 *.sqlite
 *.zip
 apps/connector/device.json
+
+# Windows installer and local Electron output
+release/
+apps/desktop/dist/
+apps/desktop/out/
