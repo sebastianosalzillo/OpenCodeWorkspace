@@ -1,22 +1,32 @@
-# Pubblica aggiornamenti nella repository GitHub esistente.
-# Richiede Git, GitHub CLI e: gh auth login
+# Aggiorna la repository GitHub esistente senza alterare LICENSE o commit precedenti.
 $ErrorActionPreference = 'Stop'
-Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$repo = 'sebastianosalzillo/OpenCodeWorkspace'
-if (-not (Test-Path .git)) {
-  git init -b main
-  git remote add origin "https://github.com/$repo.git"
-  git fetch origin main
-  git branch -M main
-  git reset --soft origin/main
-} elseif (-not ((git remote) -contains 'origin')) {
-  git remote add origin "https://github.com/$repo.git"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repo = 'https://github.com/sebastianosalzillo/OpenCodeWorkspace.git'
+if (Test-Path (Join-Path $root '.git')) {
+    Set-Location $root
+    $remote = git remote get-url origin 2>$null
+    if ($remote -notmatch 'sebastianosalzillo[\/]OpenCodeWorkspace(\.git)?$') {
+        throw "Remote origin non corrisponde a OpenCodeWorkspace: $remote"
+    }
+    git pull --ff-only origin main
+} else {
+    $target = Join-Path (Split-Path -Parent $root) 'OpenCodeWorkspace-clone'
+    if (Test-Path $target) { throw "Cartella già esistente: $target. Usa un clone aggiornato o rinominala." }
+    git clone $repo $target
+    if ($LASTEXITCODE -ne 0) { throw 'Clonazione GitHub non riuscita' }
+    Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -ne '.git' } |
+      Copy-Item -Destination $target -Recurse -Force
+    Set-Location $target
 }
 git add .
 git status --short
-Write-Host 'Controlla i file: non pubblicare password, token o .env.'
-$answer = Read-Host 'Confermi commit e push su GitHub? (SI/no)'
+$answer = Read-Host 'Hai verificato che non ci siano password o token? Confermi il push? (SI/no)'
 if ($answer -ne 'SI') { throw 'Operazione annullata' }
 git diff --cached --quiet
-if ($LASTEXITCODE -ne 0) { git commit -m 'Update OpenCode Workspace' }
-git push -u origin main
+if ($LASTEXITCODE -ne 0) {
+    git commit -m 'Update OpenCode Workspace'
+    if ($LASTEXITCODE -ne 0) { throw 'Commit fallito' }
+}
+git push origin main
+if ($LASTEXITCODE -ne 0) { throw 'Push fallito' }
+Write-Host 'Pubblicazione completata.'

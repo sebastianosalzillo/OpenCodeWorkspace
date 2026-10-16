@@ -169,7 +169,7 @@ gh auth login
 .\publish-github.ps1
 ```
 
-Lo script collega la cartella alla repository esistente e conserva il file `LICENSE` già presente, se avviato su una cartella di progetto senza repository Git inizializzata. Verifica sempre `git status` prima di confermare il push. Le `.env` e i token dei dispositivi sono esclusi dal `.gitignore`.
+Se avviato da una cartella ZIP senza `.git`, lo script clona la repository nella cartella sorella `OpenCodeWorkspace-clone`, copia i sorgenti, conserva `LICENSE`, crea un commit e lo pubblica dopo la tua conferma. Se avviato da un clone Git già associato alla repository, aggiorna il ramo `main` senza cancellare la cronologia. Le `.env` e i token sono esclusi dal `.gitignore`; controlla comunque il contenuto prima del push.
 
 ## Roadmap
 
