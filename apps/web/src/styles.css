@@ -3,3 +3,6 @@
 
 /* v0.3: dispositivo, manutenzione chat, gestione utenti */
 .diagnostic{display:flex;flex-direction:column;gap:6px;width:100%;overflow-wrap:anywhere;background:#111827;border:1px solid #384764;border-radius:9px;padding:12px;color:#acbce0;font-size:12px}.diagnostic b{color:#b9efcf}.diagnostic small{font-size:11px}.user-row .secondary{margin-left:10px}.topbar .icon-btn:hover{color:#fff}.user-row{flex-wrap:wrap}
+
+/* v0.5: selettore modelli per dispositivo e verifica dello stato operativo */
+.model-control{display:flex;align-items:center;gap:8px;min-width:0;color:#a5b5ce;font-size:12px}.model-control select{max-width:260px;min-width:160px;padding:7px 10px;font-size:12px;background:#101827;color:#ebeff9;border:1px solid #3b4560;border-radius:8px}.composer-machine{white-space:nowrap}.status-detail{padding:8px 24px;background:#152d3b;color:#ceeaf5;font-size:12px;display:flex;align-items:center;gap:12px}.status-detail button{border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer}@media(max-width:760px){.composer-footer{flex-wrap:wrap;gap:9px}.model-control{order:3;width:100%}.model-control select{max-width:none;width:100%;min-width:0}.model-control span{flex-shrink:0}}

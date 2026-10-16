@@ -1,4 +1,4 @@
-# OpenCode Workspace — MVP multiutente (v0.3)
+# OpenCode Workspace — MVP multiutente (v0.4)
 
 Piattaforma di chat multiutente con account personali e agenti OpenCode **installati sui PC Windows degli utenti**. Il server centrale autentica gli utenti e salva le chat, mentre un connettore residente su ciascun PC comunica con l'API locale di `opencode serve`.
 
@@ -18,10 +18,21 @@ Piattaforma di chat multiutente con account personali e agenti OpenCode **instal
 apps/
   server/       Express + MySQL + WebSocket + endpoint SSE
   web/          React + Vite, login, chat, dispositivi, utenti
-  connector/    Node.js Windows, OpenCode REST + SSE e WSS verso il server
+  connector/    Node.js, OpenCode REST + SSE e WSS verso il server
+  desktop/      Connettore GUI Electron + tray + configurazione cifrata (Windows)
 ```
 
 Le chat vengono filtrate sempre dal server per `user_id`, e ogni PC è assegnato al suo proprietario. Non c'è condivisione di PC fra utenti in questa versione. Il browser **non** si connette mai direttamente a OpenCode.
+
+## Novità v0.4 — connettore desktop Windows
+
+Aggiunto **OpenCode Workspace Connector** in Electron: finestra di configurazione, associazione via codice senza modificare file `.env`, icona nella tray, avvio automatico facoltativo con Windows e credenziali salvate con `safeStorage`/DPAPI. Il processo locale usa la stessa logica OpenCode del connettore Node.js. La build `.exe` NSIS è predisposta attraverso la GitHub Action manuale **Windows connector installer**.
+
+- Documentazione: [Installazione connettore Windows](docs/WINDOWS-INSTALLER.md)
+- Build su Windows: `npm install`, `npm test`, `npm run dist:windows`
+- Sviluppo GUI: `npm run dev:desktop`
+
+**Nota:** installer `.exe` non ancora compilato né collaudato su Windows in questo ambiente; la repository contiene il sorgente e lo script CI per generarlo. Il Connector GUI richiede OpenCode CLI installato a parte e non fa girare un utente Windows per altri utenti.
 
 ## Prima installazione su Windows (sviluppo locale)
 

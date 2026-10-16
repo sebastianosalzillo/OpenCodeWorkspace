@@ -1,7 +1,7 @@
 {
   "name": "@workspace/desktop",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "OpenCode Workspace Connector for Windows",
   "main": "src/main.cjs",
   "scripts": {
@@ -18,9 +18,24 @@
     "appId": "it.opencodeworkspace.connector",
     "productName": "OpenCode Workspace Connector",
     "asar": true,
-    "directories": {"output": "../../release/desktop"},
-    "files": ["src/**/*", "dist/connector.cjs", "assets/**/*", "package.json"],
-    "win": {"target": "nsis", "icon": "assets/icon.ico"},
-    "nsis": {"oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true}
+    "directories": {
+      "output": "../../release/desktop"
+    },
+    "files": [
+      "src/**/*",
+      "dist/connector.cjs",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

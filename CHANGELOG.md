@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 — 16 ottobre 2026
+
+- Nuova app Windows Electron con pannello locale, tray e collegamento con il connettore OpenCode esistente.
+- Associazione PC tramite codice temporaneo dalla GUI, nessun `PAIR_CODE` permanente.
+- Protezione DPAPI dei token e della password OpenCode con `safeStorage`; nessun fallback in chiaro.
+- Avvio a login Windows opzionale e avvio/stop manuale con diagnostica locale.
+- Validazione URL HTTPS, cartelle su unità locali, porta e password.
+- Test Node integrati e workflow manuale per produrre l'installer NSIS non firmato su Windows.
+- Documentazione di installazione e note di sicurezza.
+
+# Changelog
+
 ## 0.3.0 — Affidabilità e amministrazione utenti
 
 - Diagnostica OpenCode di ogni PC con endpoint proprietario autenticato.

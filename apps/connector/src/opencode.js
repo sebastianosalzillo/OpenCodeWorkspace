@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
+import { publicModels, isModelAvailable, validModel } from './models.js';
 
 export function sessionFromEvent(event){
   const p=event?.properties||{};
@@ -58,6 +59,10 @@ export class LocalOpenCode {
       return {healthy:!!health?.healthy,version:String(health?.version||'non disponibile'),
         workdir:this.workdir,port:this.port};
     }
+    if(method==='models'){
+      const providers=await this.call('/provider');
+      return { models:publicModels(providers) };
+    }
     if(method==='restore-sessions'){
       if(!Array.isArray(p.sessions)||p.sessions.length>100)throw new Error('Batch di sessioni non valido');
       for(const s of p.sessions){
@@ -83,6 +88,11 @@ export class LocalOpenCode {
       this.pollGenerations.delete(p.sessionId);
       return {ok:true};
     }
+    if(method==='status'){
+      const statuses=await this.call('/session/status');
+      const status=statuses?.[p.sessionId]?.type || 'idle';
+      return {status:['busy','idle','retry'].includes(status)?status:'unknown'};
+    }
     if(method==='recover'){
       // Al ricollegamento nessun prompt viene inviato una seconda volta.
       const statuses=await this.call('/session/status');
@@ -100,6 +110,13 @@ export class LocalOpenCode {
     }
     if(method==='prompt'){
       if(typeof p.text!=='string'||!p.text.trim()||p.text.length>12000)throw new Error('Prompt non valido');
+      let model;
+      if(p.model!==undefined && p.model!==null){
+        if(!validModel(p.model))throw new Error('Modello AI non valido');
+        const providers=await this.call('/provider');
+        if(!isModelAvailable(publicModels(providers),p.model))throw new Error('Modello non disponibile sul PC');
+        model={providerID:p.model.providerID,modelID:p.model.modelID};
+      }
       // Memorizziamo gli ID assistant preesistenti: la mancanza di una fase
       // busy osservabile non deve bloccare per sempre le risposte rapide.
       const before=await this.call(`/session/${id}/message`);
@@ -109,7 +126,7 @@ export class LocalOpenCode {
       this.pollGenerations.set(p.sessionId,generation);
       this.done.delete(p.sessionId);
       this.busySeen.delete(p.sessionId);
-      await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}]});
+      await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}],...(model?{model}:{})});
       this.pollUntilIdle(p.sessionId,p.chatId,baseline,generation).catch(err=>console.error('Fallback sync:',err.message));
       return {accepted:true};
     }

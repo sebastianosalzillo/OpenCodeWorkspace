@@ -101,6 +101,14 @@ api.get('/devices/:id/diagnostics',requireUser,route(async(req,res)=>{
   if(!isOnline(pc.id))return res.status(409).json({error:'PC offline'});
   res.json({diagnostics:await rpc(pc.id,'diagnostics',{},12000)});
 }));
+// Lista minima (senza chiavi API) ottenuta solo dal dispositivo di proprietà.
+api.get('/devices/:id/models',requireUser,route(async(req,res)=>{
+  const pc=await one('SELECT id FROM computers WHERE id=? AND owner_id=? AND revoked=0',[req.params.id,req.user.id]);
+  if(!pc)return res.status(404).json({error:'PC non trovato'});
+  if(!isOnline(pc.id))return res.status(409).json({error:'PC offline'});
+  const data=await rpc(pc.id,'models',{},15000);
+  res.json({models:Array.isArray(data?.models)?data.models:[]});
+}));
 api.delete('/devices/:id',requireUser,route(async(req,res)=>{
   const result=await rows('UPDATE computers SET revoked=1 WHERE id=? AND owner_id=?',[req.params.id,req.user.id]);
   if(!result.affectedRows)return res.status(404).json({error:'PC non trovato'});
@@ -163,11 +171,23 @@ api.get('/chats/:id/stream',requireUser,route(async(req,res)=>{
   subscribe(chat.id,res);
 }));
 const active=new Set();
+api.get('/chats/:id/status',requireUser,route(async(req,res)=>{
+  const chat=await ownedChat(req.user,req.params.id);
+  if(!chat)return res.status(404).json({error:'Chat non trovata'});
+  if(!isOnline(chat.computer_id))return res.status(409).json({error:'PC offline'});
+  const data=await rpc(chat.computer_id,'status',{chatId:chat.id,sessionId:chat.session_id},12000);
+  const pending=await one("SELECT COUNT(*) n FROM jobs WHERE chat_id=? AND status IN ('queued','running')",[chat.id]);
+  res.json({opencodeStatus:data?.status||'unknown',pendingJobs:Number(pending?.n||0)});
+}));
 api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
   const chat=await ownedChat(req.user,req.params.id);
   if(!chat)return res.status(404).json({error:'Chat non trovata'});
   const text=String(req.body?.text||'').trim();
   if(!text||text.length>12000)return res.status(400).json({error:'Messaggio vuoto o troppo lungo'});
+  const model=req.body?.model;
+  if(model!==undefined && model!==null && (typeof model!=='object' || Array.isArray(model) ||
+    !['providerID','modelID'].every(key=>typeof model[key]==='string' && /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/.test(model[key]))))
+    return res.status(400).json({error:'Modello selezionato non valido'});
   if(!isOnline(chat.computer_id))return res.status(409).json({error:'PC offline'});
   if(active.has(chat.id))return res.status(409).json({error:'Operazione già in corso in questa chat'});
   // Imposta il lock PRIMA della lettura MySQL: due richieste concorrenti non possono passare assieme.
@@ -185,7 +205,7 @@ api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
     await rows('INSERT INTO messages(id,chat_id,source_id,role,content) VALUES (?,?,?,?,?)',[msgId,chat.id,`local:${jobId}`,'user',text]);
     await rows('UPDATE chats SET updated_at=NOW() WHERE id=?',[chat.id]);
     publish(chat.id,{type:'message',message:{id:msgId,role:'user',content:text}});
-    await rpc(chat.computer_id,'prompt',{chatId:chat.id,sessionId:chat.session_id,text,jobId},25000);
+    await rpc(chat.computer_id,'prompt',{chatId:chat.id,sessionId:chat.session_id,text,jobId,...(model?{model}:{})},25000);
     // L'evento session.idle può arrivare prima del riscontro RPC: non riaprire un job già terminato.
     await rows("UPDATE jobs SET status='running' WHERE id=? AND status='queued'",[jobId]);
     res.status(202).json({jobId});

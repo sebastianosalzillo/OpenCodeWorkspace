@@ -25,3 +25,15 @@ I test unitari e l'API simulata sono eseguiti da `npm test`. Il build UI da `npm
 - Connettore avviato senza privilegi admin e workspace limitato a una cartella di test.
 - Non usare abbonamenti personali condivisi per più utenti AI.
 - Per deployment pubblico mettere server dietro HTTPS e reverse proxy, non esporre MySQL.
+
+
+## V0.5: Modelli e stato chat
+
+1. Collega due PC diversi con provider configurati diversamente; crea una chat sul PC A.
+2. Verifica che il menu "Modello" mostri soltanto i provider connessi sul PC A e nessun dato segreto nelle API/browser.
+3. Invia un prompt col modello predefinito, poi seleziona un modello esplicito e invia un secondo prompt. Verifica dal log OpenCode il modello effettivamente usato.
+4. Cambia chat o PC: il selettore deve azzerarsi per evitare l’invio accidentale a un provider diverso.
+5. Verifica il pulsante "Stato OpenCode" durante un'esecuzione e a lavoro concluso.
+6. Scollega il PC: le API modelli/stato devono rispondere con errore e non esporre credenziali.
+7. Accedi con il secondo utente: non può richiedere modelli o stati di PC/chat altrui.
+8. Ricorda che uno stato `idle` senza riscontro del job non deve provocare un reinvio automatico.
