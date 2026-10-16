@@ -6,3 +6,15 @@
 
 /* v0.5: selettore modelli per dispositivo e verifica dello stato operativo */
 .model-control{display:flex;align-items:center;gap:8px;min-width:0;color:#a5b5ce;font-size:12px}.model-control select{max-width:260px;min-width:160px;padding:7px 10px;font-size:12px;background:#101827;color:#ebeff9;border:1px solid #3b4560;border-radius:8px}.composer-machine{white-space:nowrap}.status-detail{padding:8px 24px;background:#152d3b;color:#ceeaf5;font-size:12px;display:flex;align-items:center;gap:12px}.status-detail button{border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer}@media(max-width:760px){.composer-footer{flex-wrap:wrap;gap:9px}.model-control{order:3;width:100%}.model-control select{max-width:none;width:100%;min-width:0}.model-control span{flex-shrink:0}}
+
+/* v0.6: comandi, modifiche ai file e output leggibili in chat */
+.tool-detail{margin-top:9px;padding:11px 13px;border:1px solid #364663;border-radius:10px;background:#171f31;font-size:12px;color:#bac8e3;min-width:0}
+.tool-detail-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tool-detail-head strong{font-size:12px;color:#e3ecff;overflow-wrap:anywhere}
+.tool-state{margin-left:auto;color:#9cc6ea;font-size:11px;text-transform:capitalize}
+.tool-file{margin-top:7px;overflow-wrap:anywhere;line-height:1.7}
+.tool-file code{background:#222d45;padding:2px 4px;border-radius:4px}
+.tool-code,.tool-diff pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;max-height:240px;overflow:auto;border-radius:7px;border:1px solid #34405c;background:#0d1422;color:#d2e3f5;padding:11px}
+.tool-diff{margin-top:8px}
+.tool-diff summary{cursor:pointer;color:#b4c7ec;font-weight:600;padding:4px 0}
+.events .tool-detail{display:block;margin:9px 0}

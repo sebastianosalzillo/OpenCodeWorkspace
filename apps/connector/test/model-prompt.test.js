@@ -20,7 +20,10 @@ test('modello selezionato: inoltra i due ID validi, esclude segreti e rifiuta pr
       {id:'local',name:'Locale',options:{apiKey:'HIDDEN_CREDENTIAL'},models:{'small-model':{name:'Small',apiKey:'DONOTLEAK'}}},
       {id:'unconnected',models:{'large-model':{name:'Private'}}}
     ]}));
-    if(req.url==='/session/test-session/message')return res.end(JSON.stringify(prompted ? [{info:{role:'assistant',id:'new-id',time:{completed:1}},parts:[{type:'text',text:'ok'}]}] : []));
+    if(req.url==='/session/test-session/message')return res.end(JSON.stringify(prompted ? [
+      {info:{role:'user',id:'user-id',time:{created:Date.now()}},parts:[{type:'text',text:'hello'}]},
+      {info:{role:'assistant',id:'new-id',parentID:'user-id',time:{completed:1}},parts:[{type:'text',text:'ok'}]}
+    ] : []));
     if(req.url==='/session/status')return res.end('{}');
     if(req.url==='/session/test-session/prompt_async'){
       prompted=true;res.writeHead(204).end();return;

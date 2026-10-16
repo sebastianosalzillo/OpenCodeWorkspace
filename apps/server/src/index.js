@@ -255,13 +255,17 @@ setCallbacks({
       await rpc(pc.id,'restore-sessions',{sessions:batch},20000);
     }
     // Ricostruisci i job attivi prima di autorizzare nuovi messaggi nella stessa chat.
-    const pendingChats=await rows(`SELECT DISTINCT ch.id AS chatId,ch.session_id AS sessionId
+    const pendingChats=await rows(`SELECT ch.id AS chatId,ch.session_id AS sessionId,
+        j.id AS jobId, j.created_at AS jobCreatedAt, m.content AS text
       FROM chats ch JOIN jobs j ON j.chat_id=ch.id
-      WHERE ch.computer_id=? AND j.status IN ('queued','running')`,[pc.id]);
+      LEFT JOIN messages m ON m.chat_id=ch.id AND m.source_id=CONCAT('local:',j.id)
+      WHERE ch.computer_id=? AND j.status IN ('queued','running')
+      ORDER BY j.created_at DESC`,[pc.id]);
     const pendingIds=new Set(pendingChats.map(x=>x.chatId));
     for(const c of pendingChats){
       active.add(c.chatId);
-      try{await rpc(pc.id,'recover',{chatId:c.chatId,sessionId:c.sessionId},15000);}
+      try{await rpc(pc.id,'recover',{chatId:c.chatId,sessionId:c.sessionId,jobId:c.jobId,
+        text:c.text,createdAfter:c.jobCreatedAt?new Date(c.jobCreatedAt).getTime():null},15000);}
       catch(err){console.warn('Recovery fallito',c.chatId,err.message);}
     }
     // Recupera risposte completate mentre il PC era offline, senza ripetere prompt.
@@ -301,11 +305,14 @@ setCallbacks({
         VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE content=VALUES(content),parts_json=VALUES(parts_json)`,
         [randomUUID(),chat.id,String(message.info.id),'assistant',content,JSON.stringify(parts)]);
     }
-    if(m.done){
-      active.delete(chat.id);
-      await rows("UPDATE jobs SET status='completed' WHERE chat_id=? AND status IN ('queued','running')",[chat.id]);
+    let completed=false;
+    if(m.done && typeof m.jobId==='string' && m.jobId){
+      // Un sync tardivo non deve completare un altro job della stessa chat.
+      const updated=await rows("UPDATE jobs SET status='completed' WHERE id=? AND chat_id=? AND status IN ('queued','running')",[m.jobId,chat.id]);
+      completed=updated.affectedRows>0;
+      if(completed)active.delete(chat.id);
     }
-    publish(chat.id,{type:'sync',done:!!m.done});
+    publish(chat.id,{type:'sync',done:completed});
   }
 });
 

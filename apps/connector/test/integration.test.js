@@ -31,7 +31,10 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
       if(promptStarted)statusReads += 1;
       return respond(promptStarted && statusReads===1 ? {ses_new:{type:'busy'}} : {});
     }
-    if(req.url==='/session/ses_new/message')return respond([{info:{id:'m1',role:'assistant',time:{completed:123}},parts:[{type:'text',text:'Precedente'}]},...(promptStarted?[{info:{id:'m-new',role:'assistant',time:{completed:456}},parts:[{type:'text',text:'OK'}]}]:[])]);
+    if(req.url==='/session/ses_new/message')return respond([{info:{id:'m1',role:'assistant',time:{completed:123}},parts:[{type:'text',text:'Precedente'}]},...(promptStarted?[
+      {info:{id:'user-new',role:'user',time:{created:Date.now()}},parts:[{type:'text',text:'Test'}]},
+      {info:{id:'m-new',role:'assistant',parentID:'user-new',time:{completed:456}},parts:[{type:'text',text:'OK'}]}
+    ]:[])]);
     if(req.url==='/session/ses_saved/message')return respond([{info:{id:'m2',role:'assistant',time:{completed:1}},parts:[{type:'text',text:'Risposta salvata'}]}]);
     if(req.url==='/permission/permission1/reply' && req.method==='POST')return respond(true);
     if(req.url==='/session/ses_new/abort' && req.method==='POST')return respond(true);
@@ -62,6 +65,11 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
     for(let attempt=0;attempt<80 && !events.some(e=>e.chatId==='chat1' && e.done);attempt++)await pause(20);
     assert.ok(events.some(e=>e.chatId==='chat1' && e.done),'La risposta asincrona deve essere sincronizzata');
     assert.equal(calls.filter(x=>x==='POST /session/ses_new/prompt_async').length,1,'nessun doppio prompt');
+    const recoverAfterRestart=await client.command('recover',{chatId:'chat1',sessionId:'ses_new',
+      jobId:'job-test',text:'Test',createdAfter:Date.now()-3000});
+    assert.equal(recoverAfterRestart.completed,true,'recupero correttamente correlato al prompt');
+    assert.equal(events.at(-1).jobId,'job-test');
+    assert.equal(calls.filter(x=>x==='POST /session/ses_new/prompt_async').length,1,'il recupero non ripete il prompt');
 
     await client.command('permission-reply',{chatId:'chat1',sessionId:'ses_new',requestId:'permission1',decision:'once'});
     assert.ok(calls.includes('POST /permission/permission1/reply'));
@@ -89,7 +97,10 @@ test('prompt rapido senza stato busy: completa soltanto quando appare una nuova 
     if(req.url==='/session/status')return res.end('{}');
     if(req.url==='/session/ses_fast/message')return res.end(JSON.stringify([
       {info:{id:'assistant-old',role:'assistant',time:{completed:1}},parts:[{type:'text',text:'Vecchio testo'}]},
-      ...(prompted?[{info:{id:'assistant-new',role:'assistant',time:{completed:2}},parts:[{type:'text',text:'Nuova risposta'}]}]:[])
+      ...(prompted?[
+        {info:{id:'user-fast',role:'user',time:{created:Date.now()}},parts:[{type:'text',text:'Nuovo prompt'}]},
+        {info:{id:'assistant-new',role:'assistant',parentID:'user-fast',time:{completed:2}},parts:[{type:'text',text:'Nuova risposta'}]}
+      ]:[])
     ]));
     if(req.url==='/session/ses_fast/prompt_async'){
       prompted=true;
