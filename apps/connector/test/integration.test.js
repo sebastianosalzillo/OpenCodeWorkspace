@@ -65,6 +65,11 @@ test('mock OpenCode: sessioni, prompt asincroni, recover e permessi senza reinvi
     for(let attempt=0;attempt<80 && !events.some(e=>e.chatId==='chat1' && e.done);attempt++)await pause(20);
     assert.ok(events.some(e=>e.chatId==='chat1' && e.done),'La risposta asincrona deve essere sincronizzata');
     assert.equal(calls.filter(x=>x==='POST /session/ses_new/prompt_async').length,1,'nessun doppio prompt');
+    const recoverAfterRestart=await client.command('recover',{chatId:'chat1',sessionId:'ses_new',
+      jobId:'job-test',text:'Test',createdAfter:Date.now()-3000});
+    assert.equal(recoverAfterRestart.completed,true,'recupero correttamente correlato al prompt');
+    assert.equal(events.at(-1).jobId,'job-test');
+    assert.equal(calls.filter(x=>x==='POST /session/ses_new/prompt_async').length,1,'il recupero non ripete il prompt');
 
     await client.command('permission-reply',{chatId:'chat1',sessionId:'ses_new',requestId:'permission1',decision:'once'});
     assert.ok(calls.includes('POST /permission/permission1/reply'));
