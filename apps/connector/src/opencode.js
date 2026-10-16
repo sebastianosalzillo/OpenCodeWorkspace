@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { publicModels, isModelAvailable, validModel } from './models.js';
+import { SSEParser } from './sse.js';
 
 export function sessionFromEvent(event){
   const p=event?.properties||{};
@@ -29,6 +30,7 @@ export class LocalOpenCode {
     this.baselines=new Map();
     this.aborting=new Set();
     this.pollIntervalMs=3000;
+    this.streamRetryMs=2500;
   }
   auth(){return 'Basic '+Buffer.from(`${this.username}:${this.password}`).toString('base64');}
   async call(path,method='GET',body){
@@ -247,33 +249,42 @@ export class LocalOpenCode {
       }catch(err){if(attempt%10===0)console.error('Polling OpenCode:',err.message);}
     }
   }
-  async streamEvents(){
-    for(;;){
+  async reconcileAfterStreamReconnect(){
+    // Recupera lo snapshot dei messaggi persi senza segnare concluso un job
+    // e senza inviare nuovamente alcun prompt.
+    for(const [sessionId,chatId] of this.sessionToChat){
+      try {await this.sync(sessionId,chatId,false);}
+      catch(err){console.warn('Riallineamento SSE:',sessionId,err.message);}
+    }
+  }
+  async handleStreamEvent(event){
+    const sessionId=sessionFromEvent(event);
+    const chatId=this.sessionToChat.get(sessionId);
+    if(!chatId)return;
+    this.emit({type:'event',chatId,sessionId,event:{type:event.type,properties:event.properties}});
+    if(event.type==='session.idle')await this.finish(sessionId);
+  }
+  async streamEvents({signal}={}){
+    let connections=0;
+    while(!signal?.aborted){
       try{
-        const response=await fetch(this.base+'/event',{headers:{Authorization:this.auth(),Accept:'text/event-stream'}});
+        const response=await fetch(this.base+'/event',{
+          headers:{Authorization:this.auth(),Accept:'text/event-stream'},signal
+        });
         if(!response.ok)throw new Error(`Event stream HTTP ${response.status}`);
-        const decoder=new TextDecoder();let buffer='';
+        const parser=new SSEParser();
+        connections++;
+        if(connections>1)await this.reconcileAfterStreamReconnect();
         for await(const chunk of response.body){
-          buffer+=decoder.decode(chunk,{stream:true}).replace(/\r\n/g,'\n');
-          if(buffer.length>2_000_000){buffer='';continue;}
-          let pos;
-          while((pos=buffer.indexOf('\n\n'))!==-1){
-            const block=buffer.slice(0,pos);buffer=buffer.slice(pos+2);
-            const data=block.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');
-            if(!data)continue;
-            try{
-              const event=JSON.parse(data);
-              const sessionId=sessionFromEvent(event);
-              const chatId=this.sessionToChat.get(sessionId);
-              if(!chatId)continue;
-              const safe={type:event.type,properties:event.properties};
-              this.emit({type:'event',chatId,sessionId,event:safe});
-              if(event.type==='session.idle')await this.finish(sessionId);
-            }catch(e){console.error('Evento OpenCode:',e.message);}
+          if(signal?.aborted)break;
+          for(const data of parser.push(chunk)){
+            try{await this.handleStreamEvent(JSON.parse(data));}
+            catch(err){console.warn('Evento OpenCode non valido:',err.message);}
           }
         }
-      }catch(e){console.error('SSE OpenCode disconnesso:',e.message);}
-      await new Promise(r=>setTimeout(r,2500));
+      }catch(err){if(!signal?.aborted)console.warn('SSE OpenCode disconnesso:',err.message);}
+      if(signal?.aborted)break;
+      await new Promise(resolve=>setTimeout(resolve,this.streamRetryMs));
     }
   }
 }

@@ -2,10 +2,11 @@
   "name": "@workspace/connector",
   "private": true,
   "type": "module",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "smoke": "node scripts/smoke-opencode.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

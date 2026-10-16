@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.0 — 16 ottobre 2026
+
+- Visualizzazione di esecuzioni OpenCode in tempo reale: `bash`, modifiche file, patch, output/errore, stato dello strumento con espansione dei dettagli.
+- Ripristino cronologia al ricollegamento EventSource e ricostruzione del testo parziale per ID delle singole parti.
+- Recupero conservativo dei job attivi alla riconnessione: non si marca `completed` senza prova correlata a un nuovo messaggio; l'utente vede l'esito incerto.
+- Endpoint `POST /api/chats/:id/resolve` per sblocco manuale solo dopo verifica esplicita e con OpenCode in stato `idle`; il job è segnato `interrupted` e **non** completato.
+- Corretto `abort` affinché non invii `done:true`; protetto `session.idle` da eventi tardivi mediante baseline ID assistant.
+- 17 test locali superati; parsing JSX riuscito. Build completa e collaudo Windows/MySQL/OpenCode reale ancora da effettuare.
+
 ## v0.5.0 — 16 ottobre 2026
 
 - Selezione del modello AI per singolo messaggio nella chat web; scelta "Predefinito OpenCode" sempre disponibile.

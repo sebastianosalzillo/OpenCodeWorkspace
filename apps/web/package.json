@@ -2,7 +2,7 @@
   "name": "@workspace/web",
   "private": true,
   "type": "module",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "scripts": {
     "dev": "vite --host localhost",
     "build": "vite build",

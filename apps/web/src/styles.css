@@ -27,3 +27,9 @@
 @media(max-width:800px){.live-tool-list{margin-left:0}.tool-details>summary{flex-wrap:wrap}.tool-status{margin-left:auto}}
 
 .recovery-warning{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.recovery-warning .secondary{font-size:12px;padding:7px 11px}
+
+/* v0.7 — visibilita del canale SSE browser/server */
+.chat-stream{font-size:11px;white-space:nowrap;color:#9aa8c2}
+.chat-stream.online{color:#79dfba}
+.chat-stream.reconnecting{color:#ffcc85}
+@media(max-width:800px){.chat-stream{font-size:0}.chat-stream::first-letter{font-size:12px}}

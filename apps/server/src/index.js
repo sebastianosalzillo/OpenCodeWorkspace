@@ -3,8 +3,8 @@ import express from 'express';
 import http from 'node:http';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { pool, one, rows, sqlDate } from './db.js';
-import { requireUser, requireAdmin, login, logout, createUser, digest, validPassword, validUsername } from './auth.js';
-import { attachAgentSockets, isOnline, publish, rpc, subscribe, setCallbacks, disconnectDevice } from './realtime.js';
+import { requireUser, requireAdmin, login, logout, sessionUser, createUser, digest, validPassword, validUsername } from './auth.js';
+import { attachAgentSockets, isOnline, publish, rpc, subscribe, setCallbacks, disconnectDevice, disconnectUserStreams } from './realtime.js';
 
 const app=express();
 app.disable('x-powered-by');
@@ -33,7 +33,10 @@ function throttle(req,res,next){
 }
 setInterval(()=>{const now=Date.now();for(const [key,state] of attempts)if(now-state.since>300000)attempts.delete(key);},300000).unref();
 api.post('/auth/login',throttle,route(login));
-api.post('/auth/logout',route(logout));
+api.post('/auth/logout',requireUser,route(async(req,res)=>{
+  disconnectUserStreams(req.user.id);
+  await logout(req,res);
+}));
 api.get('/me',requireUser,route(async(req,res)=>res.json({user:req.user})));
 
 api.get('/admin/users',requireUser,requireAdmin,route(async(req,res)=>{
@@ -65,6 +68,7 @@ api.patch('/admin/users/:id/status',requireUser,requireAdmin,route(async(req,res
     await rows('DELETE FROM pairing_codes WHERE user_id=?',[target.id]);
     const pcs=await rows('SELECT id FROM computers WHERE owner_id=?',[target.id]);
     for(const pc of pcs)disconnectDevice(pc.id);
+    disconnectUserStreams(target.id);
   }
   res.json({ok:true});
 }));
@@ -168,7 +172,13 @@ api.get('/chats/:id/messages',requireUser,route(async(req,res)=>{
 api.get('/chats/:id/stream',requireUser,route(async(req,res)=>{
   const chat=await ownedChat(req.user,req.params.id);
   if(!chat)return res.status(404).json({error:'Chat non trovata'});
-  subscribe(chat.id,res);
+  subscribe(chat.id,res,{
+    userId:req.user.id,
+    authorize:async()=>{
+      const user=await sessionUser(req);
+      return user?.id===req.user.id && Boolean(await ownedChat(user,chat.id));
+    }
+  });
 }));
 const active=new Set();
 api.get('/chats/:id/status',requireUser,route(async(req,res)=>{

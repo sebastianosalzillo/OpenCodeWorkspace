@@ -1,4 +1,4 @@
-# OpenCode Workspace — MVP multiutente (v0.5)
+# OpenCode Workspace — MVP multiutente (v0.6)
 
 Piattaforma di chat multiutente con account personali e agenti OpenCode **installati sui PC Windows degli utenti**. Il server centrale autentica gli utenti e salva le chat, mentre un connettore residente su ciascun PC comunica con l'API locale di `opencode serve`.
 
@@ -23,6 +23,20 @@ apps/
 ```
 
 Le chat vengono filtrate sempre dal server per `user_id`, e ogni PC è assegnato al suo proprietario. Non c'è condivisione di PC fra utenti in questa versione. Il browser **non** si connette mai direttamente a OpenCode.
+
+## Novità v0.6 — attività dettagliate e recupero verificabile
+
+- La chat mostra comandi e modifiche ai file in schede espandibili, con stato, percorso, patch ed eventuale output/errore; i testi lunghi vengono troncati nella UI. L'intero oggetto di input non viene mostrato indiscriminatamente.
+- I tool in esecuzione sono aggiornati dai messaggi `message.part.updated`; i frammenti di testo sono gestiti separatamente per ID, anche con `message.part.delta`.
+- Dopo il refresh o il ricollegamento dello stream, la chat ricarica dal database i messaggi e i risultati degli strumenti già sincronizzati.
+- Una sessione recuperata da una disconnessione **non viene mai dichiarata completata solo perché OpenCode è tornato `idle`**. Rimane in stato incerto fino a verifica o interruzione esplicita.
+- Per sbloccare un job incerto è disponibile `POST /api/chats/:id/resolve` con `{ "reviewed": true }`: il server verifica proprietario, PC online e stato OpenCode `idle`, sincronizza la chat, poi registra il job come **interrotto/non verificato**, non come completato.
+- Gli eventi `session.idle` ritardati non possono chiudere un nuovo prompt se manca una nuova risposta assistant successiva agli ID preesistenti.
+- `abort` non segnala un completamento positivo nel backend.
+
+**Test:** `npm test` esegue 17 controlli automatici (mock OpenCode, UI activity, riconnessione, evento idle tardivo). È stato eseguito anche il parsing JSX; la build completa richiede dipendenze npm non disponibili nell'ambiente di generazione. Il flusso Windows+MySQL+OpenCode reale va ancora collaudato.
+
+**Sicurezza operativa:** mostrare comandi e output potrebbe visualizzare informazioni sensibili se un utente le inserisce nei prompt o nei comandi. Non inserire token e password nelle chat; eseguire OpenCode con un utente Windows non amministratore e una cartella dedicata. La v0.6 rimane un prototipo da testare, non un prodotto pronto da esporre pubblicamente.
 
 ## Novità v0.5 — selezione modelli e stato delle sessioni
 

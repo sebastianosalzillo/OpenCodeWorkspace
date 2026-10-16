@@ -1,7 +1,7 @@
 {
   "name": "opencode-workspace",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "workspaces": [
     "apps/*"
@@ -14,7 +14,8 @@
     "dist:windows": "npm run dist:win -w @workspace/desktop",
     "build": "npm run build -w @workspace/web",
     "test": "node --test apps/server/test/*.test.js apps/connector/test/*.test.js apps/desktop/test/*.test.cjs apps/web/src/*.test.js",
-    "admin:create": "npm run admin:create -w @workspace/server"
+    "admin:create": "npm run admin:create -w @workspace/server",
+    "smoke:opencode": "npm run smoke -w @workspace/connector"
   },
   "engines": {
     "node": ">=20"

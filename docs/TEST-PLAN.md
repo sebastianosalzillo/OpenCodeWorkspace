@@ -48,3 +48,15 @@ I test unitari e l'API simulata sono eseguiti da `npm test`. Il build UI da `npm
 6. Due utenti, su due PC separati: un utente non deve poter vedere né aggiornare le chat o i job dell'altro, anche alterando l'ID nell'URL.
 
 **Nota:** i test automatici simulano OpenCode. Non equivalgono a una verifica su dispositivo reale e non garantiscono isolamento completo dei processi Windows.
+
+## v0.7 — connessione eventi, revoca e smoke reale
+
+1. `npm test`: verifica il parser SSE quando il trasporto divide UTF-8, CRLF, blocchi multilinea e quando il payload è troppo grande.
+2. Prova l'interruzione simulata del canale `/event`: il connettore deve riconnettersi, sincronizzare le risposte tramite `/session/:id/message` e **non** inviare `prompt_async` una seconda volta.
+3. Da browser apri una chat e osserva l'indicatore "Chat live"; scollega temporaneamente il server per vedere "Riconnessione chat", poi verifica che al ritorno venga ricaricata la cronologia.
+4. Con due account diversi, conferma che gli stream SSE non mostrino i dati di chat altrui; disattiva un account mentre lo stream è aperto e verifica la chiusura della connessione. Anche logout deve chiudere gli stream dell'utente.
+5. Sul PC Windows con OpenCode già configurato e il relativo `.env` del connettore, esegui `npm run smoke:opencode`: deve ottenere il health check autenticato e l'elenco di modelli senza inviare prompt.
+6. Per verificare creazione/eliminazione di una sessione di prova (non vengono eseguiti prompt): `npm run smoke -w @workspace/connector -- --session`.
+7. Infine verifica con un *utente di test* il percorso browser → server MySQL → connettore Windows → OpenCode reale. **Questo collaudo non è sostituito dai test mock.**
+
+Le credenziali OpenCode rimangono solo sul PC; non copiare `.env` o `device.json` in GitHub. Il progetto **non fornisce isolamento forte** contro comandi eseguiti dall'agente Windows; per test reali usare cartelle e account Windows a privilegi limitati.

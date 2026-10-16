@@ -1,3 +1,4 @@
+export {publish, subscribe, disconnectUserStreams} from './chat-stream.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { one, rows } from './db.js';
@@ -5,25 +6,11 @@ import { digest } from './auth.js';
 
 const devices = new Map();
 const pending = new Map();
-const listeners = new Map();
 let callbacks = {};
 export const setCallbacks = (handlers) => { callbacks = handlers; };
 export function disconnectDevice(id){devices.get(id)?.terminate();devices.delete(id);}
 export const isOnline = (id) => devices.get(id)?.readyState === WebSocket.OPEN;
 
-export function publish(chatId, data) {
-  const encoded = `data: ${JSON.stringify(data)}\n\n`;
-  for (const res of listeners.get(chatId) || []) res.write(encoded);
-}
-export function subscribe(chatId, res) {
-  res.set({ 'Content-Type':'text/event-stream', 'Cache-Control':'no-cache, no-transform', 'Connection':'keep-alive', 'X-Accel-Buffering':'no' });
-  res.flushHeaders();
-  res.write(`data: ${JSON.stringify({type:'connected'})}\n\n`);
-  if (!listeners.has(chatId)) listeners.set(chatId, new Set());
-  listeners.get(chatId).add(res);
-  const keep = setInterval(()=>res.write(': heartbeat\n\n'),20000);
-  res.on('close',()=>{clearInterval(keep);listeners.get(chatId)?.delete(res);});
-}
 export function rpc(deviceId,method,payload={},timeoutMs=20000) {
   return new Promise((resolve,reject)=>{
     const ws = devices.get(deviceId);
