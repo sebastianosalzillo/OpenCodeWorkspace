@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { publicModels, isModelAvailable, validModel } from './models.js';
+import { matchingReply } from './recovery.js';
 
 export function sessionFromEvent(event){
   const p=event?.properties||{};
@@ -24,6 +25,7 @@ export class LocalOpenCode {
     this.finishing=new Set();
     this.busySeen=new Set();
     this.pollGenerations=new Map();
+    this.pendingJobs=new Map();
     this.pollIntervalMs=3000;
   }
   auth(){return 'Basic '+Buffer.from(`${this.username}:${this.password}`).toString('base64');}
@@ -86,6 +88,7 @@ export class LocalOpenCode {
       this.done.delete(p.sessionId);
       this.busySeen.delete(p.sessionId);
       this.pollGenerations.delete(p.sessionId);
+      this.pendingJobs.delete(p.sessionId);
       return {ok:true};
     }
     if(method==='status'){
@@ -98,13 +101,24 @@ export class LocalOpenCode {
       const statuses=await this.call('/session/status');
       const busy=statuses?.[p.sessionId]?.type==='busy';
       const messages=await this.call(`/session/${id}/message`);
-      // Non interpretare una vecchia risposta assistant come esito del job
-      // pendente: senza una correlazione certa la consegna resta irrisolta.
-      const completed=false;
-      this.emit({type:'messages',chatId:p.chatId,sessionId:p.sessionId,messages,done:completed});
-      if(busy){
-        this.busySeen.add(p.sessionId);
-        this.pollUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Recovery polling:',err.message));
+      // Il server rimanda il testo e l'istante del job pendente.
+      // Una risposta precedente o non correlabile NON sblocca la chat.
+      const tracked=typeof p.text==='string' && p.text
+        ? {jobId:p.jobId||null,text:p.text,after:Number(p.createdAfter)||null}
+        : null;
+      if(tracked)this.pendingJobs.set(p.sessionId,tracked);
+      const completed=!!tracked && !busy && !!matchingReply(messages,tracked);
+      if(completed){
+        this.done.add(p.sessionId);
+        this.pendingJobs.delete(p.sessionId);
+      }
+      this.emit({type:'messages',chatId:p.chatId,sessionId:p.sessionId,messages,done:completed,jobId:tracked?.jobId||null});
+      if(!completed && tracked){
+        if(busy)this.busySeen.add(p.sessionId);
+        const generation=(this.pollGenerations.get(p.sessionId)||0)+1;
+        this.pollGenerations.set(p.sessionId,generation);
+        this.done.delete(p.sessionId);
+        this.pollUntilIdle(p.sessionId,p.chatId,null,generation).catch(err=>console.error('Recovery polling:',err.message));
       }
       return {running:busy,completed,unresolved:!busy&&!completed};
     }
@@ -126,11 +140,12 @@ export class LocalOpenCode {
       this.pollGenerations.set(p.sessionId,generation);
       this.done.delete(p.sessionId);
       this.busySeen.delete(p.sessionId);
+      this.pendingJobs.set(p.sessionId,{jobId:p.jobId||null,text:p.text,after:null,baseline});
       await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}],...(model?{model}:{})});
       this.pollUntilIdle(p.sessionId,p.chatId,baseline,generation).catch(err=>console.error('Fallback sync:',err.message));
       return {accepted:true};
     }
-    if(method==='abort'){await this.call(`/session/${id}/abort`,'POST');this.pollGenerations.delete(p.sessionId);await this.sync(p.sessionId,p.chatId,true);return {ok:true};}
+    if(method==='abort'){await this.call(`/session/${id}/abort`,'POST');this.pollGenerations.delete(p.sessionId);this.pendingJobs.delete(p.sessionId);this.done.add(p.sessionId);await this.sync(p.sessionId,p.chatId,false);return {ok:true};}
     if(method==='sync'){await this.sync(p.sessionId,p.chatId,false);return {ok:true};}
     if(method==='permission-reply'){
       if(!['once','reject'].includes(p.decision))throw new Error('Scelta permesso non valida');
@@ -145,17 +160,25 @@ export class LocalOpenCode {
     }
     throw new Error('RPC sconosciuta');
   }
-  async sync(sessionId,chatId,done){
+  async sync(sessionId,chatId,done,jobId=null){
     const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
-    this.emit({type:'messages',chatId,sessionId,messages,done});
+    this.emit({type:'messages',chatId,sessionId,messages,done,jobId});
   }
   async finish(sessionId){
     if(this.done.has(sessionId)||this.finishing.has(sessionId))return;
+    const tracked=this.pendingJobs.get(sessionId);
+    if(!tracked)return; // un evento session.idle vecchio non chiude un job nuovo
     this.finishing.add(sessionId);
     try{
+      const statuses=await this.call('/session/status');
+      if(['busy','retry'].includes(statuses?.[sessionId]?.type))return;
+      const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
       const chatId=this.sessionToChat.get(sessionId);
-      if(chatId)await this.sync(sessionId,chatId,true);
+      const completed=!!matchingReply(messages,tracked);
+      if(chatId)this.emit({type:'messages',chatId,sessionId,messages,done:completed,jobId:tracked.jobId});
+      if(!completed)return;
       this.done.add(sessionId);
+      this.pendingJobs.delete(sessionId);
     }finally{this.finishing.delete(sessionId);}
   }
   async pollUntilIdle(sessionId,chatId,baseline=null,generation=null){
@@ -175,14 +198,14 @@ export class LocalOpenCode {
               m.info?.role==='assistant' && m.info?.id && !baseline.has(m.info.id) && m.info?.time?.completed);
             if(!answered)continue;
           }
-          await this.finish(sessionId);break;
+          await this.finish(sessionId);if(this.done.has(sessionId))break;
         }
         // Alcuni server non emettono mai busy per prompt rapidissimi.
         if(!status&&baseline){
           const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
           const answered=Array.isArray(messages)&&messages.some(m=>
             m.info?.role==='assistant'&&m.info?.id&&!baseline.has(m.info.id)&&m.info?.time?.completed);
-          if(answered){await this.finish(sessionId);break;}
+          if(answered){await this.finish(sessionId);if(this.done.has(sessionId))break;}
         }
       }catch(err){if(attempt%10===0)console.error('Polling OpenCode:',err.message);}
     }
