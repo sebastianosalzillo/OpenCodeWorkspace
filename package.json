@@ -1,0 +1,16 @@
+{
+  "name": "opencode-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:server": "npm run dev -w @workspace/server",
+    "dev:web": "npm run dev -w @workspace/web",
+    "dev:connector": "npm run dev -w @workspace/connector",
+    "build": "npm run build -w @workspace/web",
+    "test": "node --test apps/server/test/*.test.js apps/connector/test/*.test.js",
+    "admin:create": "npm run admin:create -w @workspace/server"
+  },
+  "engines": { "node": ">=20" }
+}

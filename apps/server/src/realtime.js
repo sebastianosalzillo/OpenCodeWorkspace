@@ -1,0 +1,80 @@
+import { WebSocketServer, WebSocket } from 'ws';
+import { randomUUID } from 'node:crypto';
+import { one, rows } from './db.js';
+import { digest } from './auth.js';
+
+const devices = new Map();
+const pending = new Map();
+const listeners = new Map();
+let callbacks = {};
+export const setCallbacks = (handlers) => { callbacks = handlers; };
+export function disconnectDevice(id){devices.get(id)?.terminate();devices.delete(id);}
+export const isOnline = (id) => devices.get(id)?.readyState === WebSocket.OPEN;
+
+export function publish(chatId, data) {
+  const encoded = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of listeners.get(chatId) || []) res.write(encoded);
+}
+export function subscribe(chatId, res) {
+  res.set({ 'Content-Type':'text/event-stream', 'Cache-Control':'no-cache, no-transform', 'Connection':'keep-alive', 'X-Accel-Buffering':'no' });
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({type:'connected'})}\n\n`);
+  if (!listeners.has(chatId)) listeners.set(chatId, new Set());
+  listeners.get(chatId).add(res);
+  const keep = setInterval(()=>res.write(': heartbeat\n\n'),20000);
+  res.on('close',()=>{clearInterval(keep);listeners.get(chatId)?.delete(res);});
+}
+export function rpc(deviceId,method,payload={},timeoutMs=20000) {
+  return new Promise((resolve,reject)=>{
+    const ws = devices.get(deviceId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error('Computer offline'));
+    const id=randomUUID();
+    const timer=setTimeout(()=>{pending.delete(id);reject(new Error('Operazione scaduta: verificare lo stato del PC prima di riprovare'));},timeoutMs);
+    pending.set(id,{deviceId,resolve,reject,timer});
+    ws.send(JSON.stringify({type:'rpc',id,method,payload}),err=>{
+      if(err){clearTimeout(timer);pending.delete(id);reject(err);}
+    });
+  });
+}
+
+export function attachAgentSockets(server) {
+  const wss=new WebSocketServer({noServer:true,maxPayload:2*1024*1024});
+  server.on('upgrade',async(req,socket,head)=>{
+    if(new URL(req.url,'http://localhost').pathname!=='/agent') return socket.destroy();
+    try{
+      const match=/^Bearer ([0-9a-f]{64})$/.exec(req.headers.authorization||'');
+      if(!match) return socket.destroy();
+      const pc=await one('SELECT id,owner_id FROM computers WHERE device_token_hash=? AND revoked=0',[digest(match[1])]);
+      if(!pc)return socket.destroy();
+      wss.handleUpgrade(req,socket,head,ws=>wss.emit('connection',ws,pc));
+    }catch{socket.destroy();}
+  });
+  wss.on('connection',(ws,pc)=>{
+    devices.get(pc.id)?.terminate();
+    devices.set(pc.id,ws);
+    ws.pc=pc;
+    ws.isAlive=true;
+    ws.on('pong',()=>{ws.isAlive=true;});
+    rows('UPDATE computers SET last_seen=NOW() WHERE id=?',[pc.id]).catch(console.error);
+    ws.on('message',async(raw)=>{
+      try{
+        const m=JSON.parse(raw.toString());
+        if(m.type==='result'){
+          const x=pending.get(m.id);
+          if(!x || x.deviceId!==pc.id)return;
+          clearTimeout(x.timer);pending.delete(m.id);
+          m.ok ? x.resolve(m.data) : x.reject(new Error(String(m.error||'Errore connettore').slice(0,500)));
+        } else if(m.type==='event') await callbacks.onEvent?.(pc,m);
+        else if(m.type==='messages') await callbacks.onMessages?.(pc,m);
+      }catch(err){console.error('Agent message:',err.message);}
+    });
+    ws.on('close',()=>{
+      if(devices.get(pc.id)===ws)devices.delete(pc.id);
+      for(const [id,x] of pending){if(x.deviceId===pc.id){clearTimeout(x.timer);pending.delete(id);x.reject(new Error('PC scollegato'));}}
+    });
+  });
+  const heartbeat=setInterval(()=>{
+    for(const ws of wss.clients){if(!ws.isAlive){ws.terminate();continue;}ws.isAlive=false;ws.ping();}
+  },30000);
+  server.on('close',()=>clearInterval(heartbeat));
+}
