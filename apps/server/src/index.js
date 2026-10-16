@@ -220,6 +220,24 @@ api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
     res.status(uncertain?409:502).json({error:uncertain?'Esecuzione forse avviata: non ripetere il prompt. Sincronizza o interrompi.':err.message});
   }
 }));
+// Chiusura esplicita dei job incerti: solo il proprietario, dopo averne esaminato gli effetti.
+// Non si dichiara "completed" un comando di cui non possiamo provare la conclusione.
+api.post('/chats/:id/resolve',requireUser,route(async(req,res)=>{
+  const chat=await ownedChat(req.user,req.params.id);
+  if(!chat)return res.status(404).json({error:'Chat non trovata'});
+  if(req.body?.reviewed!==true)return res.status(400).json({error:'Conferma la verifica manuale'});
+  const uncertain=await one("SELECT id FROM jobs WHERE chat_id=? AND status IN ('queued','running') AND error_text IS NOT NULL LIMIT 1",[chat.id]);
+  if(!uncertain)return res.status(409).json({error:'Nessun job incerto da verificare'});
+  if(!isOnline(chat.computer_id))return res.status(409).json({error:'Il PC deve essere online'});
+  const state=await rpc(chat.computer_id,'status',{chatId:chat.id,sessionId:chat.session_id},12000);
+  if(state?.status!=='idle')return res.status(409).json({error:'OpenCode non è inattivo: non è sicuro chiudere il job'});
+  await rpc(chat.computer_id,'sync',{chatId:chat.id,sessionId:chat.session_id},15000);
+  await rows("UPDATE jobs SET status='interrupted',error_text='Chiuso dopo verifica manuale: esito non garantito' WHERE chat_id=? AND status IN ('queued','running') AND error_text IS NOT NULL",[chat.id]);
+  active.delete(chat.id);
+  publish(chat.id,{type:'done',reviewed:true,uncertain:true});
+  res.json({ok:true,reviewed:true});
+}));
+
 api.post('/chats/:id/abort',requireUser,route(async(req,res)=>{
   const chat=await ownedChat(req.user,req.params.id);
   if(!chat)return res.status(404).json({error:'Chat non trovata'});
@@ -261,8 +279,15 @@ setCallbacks({
     const pendingIds=new Set(pendingChats.map(x=>x.chatId));
     for(const c of pendingChats){
       active.add(c.chatId);
-      try{await rpc(pc.id,'recover',{chatId:c.chatId,sessionId:c.sessionId},15000);}
-      catch(err){console.warn('Recovery fallito',c.chatId,err.message);}
+      try{
+        const state=await rpc(pc.id,'recover',{chatId:c.chatId,sessionId:c.sessionId},15000);
+        // Nessuna risposta storica può chiudere un job pendente senza correlazione.
+        if(state?.unresolved){
+          await rows("UPDATE jobs SET error_text=? WHERE chat_id=? AND status IN ('queued','running')",
+            ['Consegna incerta: controlla la cronologia OpenCode prima di risolvere il job',c.chatId]);
+          publish(c.chatId,{type:'recovery',state:'unresolved'});
+        }
+      }catch(err){console.warn('Recovery fallito',c.chatId,err.message);}
     }
     // Recupera risposte completate mentre il PC era offline, senza ripetere prompt.
     for(const c of sessions){
@@ -282,6 +307,12 @@ setCallbacks({
           VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE details_json=VALUES(details_json)`,[randomUUID(),chat.id,requestId,JSON.stringify(details)]);
         publish(chat.id,{type:'permission',requestId,details});
       }
+    }
+    if(m.event?.type==='workspace.recovery'){
+      await rows("UPDATE jobs SET error_text=? WHERE chat_id=? AND status IN ('queued','running')",
+        ['Esecuzione da verificare dopo la riconnessione',chat.id]);
+      publish(chat.id,{type:'recovery',state:'unresolved'});
+      return;
     }
     if(m.event?.type==='session.error'){
       await rows("UPDATE jobs SET status='failed',error_text='Errore OpenCode' WHERE chat_id=? AND status IN ('queued','running')",[chat.id]);

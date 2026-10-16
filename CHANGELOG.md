@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0 — 16 ottobre 2026
+
+- Selezione del modello AI per singolo messaggio nella chat web; scelta "Predefinito OpenCode" sempre disponibile.
+- Nuove RPC `models` e `status` nel connettore; elenco modelli limitato ai provider collegati sul PC, senza chiavi o opzioni sensibili.
+- Nuove API `/api/devices/:id/models` e `/api/chats/:id/status`, con controllo proprietà dell’utente e stato online.
+- Controlli severi del modello scelto su backend e connettore, prima dell’invio a OpenCode.
+- Nuovo pulsante stato sessione OpenCode nella barra chat; UI responsive per il selettore modello.
+- Test HTTP simulato che verifica il payload `model` per `prompt_async`, rifiuto dei provider non connessi e non divulgazione di segreti.
+- Limiti: non è stata verificata la build React con dipendenze installate né la comunicazione con OpenCode reale.
+
+
 ## v0.4.0 — 16 ottobre 2026
 
 - Nuova app Windows Electron con pannello locale, tray e collegamento con il connettore OpenCode esistente.
@@ -10,7 +21,6 @@
 - Test Node integrati e workflow manuale per produrre l'installer NSIS non firmato su Windows.
 - Documentazione di installazione e note di sicurezza.
 
-# Changelog
 
 ## 0.3.0 — Affidabilità e amministrazione utenti
 
@@ -23,7 +33,6 @@
 - Connessioni WebSocket obsolete non possono elaborare nuovi eventi.
 - Aggiunto test per risposta rapida senza fase busy; ampliato mock OpenCode per diagnostica e cancellazione.
 
-# Changelog
 
 ## 0.2.0 — Session recovery e affidabilità (16 ottobre 2026)
 

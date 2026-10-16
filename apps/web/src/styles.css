@@ -6,3 +6,24 @@
 
 /* v0.5: selettore modelli per dispositivo e verifica dello stato operativo */
 .model-control{display:flex;align-items:center;gap:8px;min-width:0;color:#a5b5ce;font-size:12px}.model-control select{max-width:260px;min-width:160px;padding:7px 10px;font-size:12px;background:#101827;color:#ebeff9;border:1px solid #3b4560;border-radius:8px}.composer-machine{white-space:nowrap}.status-detail{padding:8px 24px;background:#152d3b;color:#ceeaf5;font-size:12px;display:flex;align-items:center;gap:12px}.status-detail button{border:0;background:transparent;color:inherit;font-size:18px;cursor:pointer}@media(max-width:760px){.composer-footer{flex-wrap:wrap;gap:9px}.model-control{order:3;width:100%}.model-control select{max-width:none;width:100%;min-width:0}.model-control span{flex-shrink:0}}
+
+/* v0.6 — tool timeline visibile solo al proprietario della chat */
+.tool-details{border:1px solid #343e57;background:#182237;border-radius:10px;margin-top:8px;min-width:0;color:#d6dff3}
+.tool-details>summary{display:flex;align-items:center;gap:9px;padding:11px 12px;cursor:pointer;list-style:none;font-size:12px}
+.tool-details>summary::-webkit-details-marker{display:none}
+.tool-details>summary::after{content:'⌄';color:#9eaac5}
+.tool-details[open]>summary::after{transform:rotate(180deg)}
+.tool-target{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a5b6d4;font-family:ui-monospace,Consolas,monospace}
+.tool-status{white-space:nowrap;border-radius:6px;background:#2a3752;color:#bbcbf0;padding:3px 7px;font-size:11px}
+.tool-error .tool-status{background:#5d2d3d;color:#ffd2dc}
+.tool-running .tool-status{background:#3d364d;color:#eed6ff}
+.tool-completed .tool-status{background:#1f453d;color:#aff0ca}
+.tool-detail-body{padding:5px 12px 12px;border-top:1px solid #33405b}
+.tool-detail-body section{margin-top:12px}
+.tool-detail-body small,.live-tools-label{color:#95a9d1;font-size:11px;font-weight:700}
+.tool-detail-body pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;max-height:270px;background:#111726;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.55;margin:5px 0}
+.live-tool-list{margin-left:46px}.live-tools-label{margin:9px 0}
+.recovery-warning{background:#3e3326;border:1px solid #8c6b3a;border-radius:10px;color:#ffdea7;padding:10px;font-size:12px;max-width:840px;margin:0 auto 8px}
+@media(max-width:800px){.live-tool-list{margin-left:0}.tool-details>summary{flex-wrap:wrap}.tool-status{margin-left:auto}}
+
+.recovery-warning{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.recovery-warning .secondary{font-size:12px;padding:7px 11px}

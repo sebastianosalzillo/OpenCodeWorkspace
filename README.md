@@ -1,4 +1,4 @@
-# OpenCode Workspace — MVP multiutente (v0.4)
+# OpenCode Workspace — MVP multiutente (v0.5)
 
 Piattaforma di chat multiutente con account personali e agenti OpenCode **installati sui PC Windows degli utenti**. Il server centrale autentica gli utenti e salva le chat, mentre un connettore residente su ciascun PC comunica con l'API locale di `opencode serve`.
 
@@ -23,6 +23,18 @@ apps/
 ```
 
 Le chat vengono filtrate sempre dal server per `user_id`, e ogni PC è assegnato al suo proprietario. Non c'è condivisione di PC fra utenti in questa versione. Il browser **non** si connette mai direttamente a OpenCode.
+
+## Novità v0.5 — selezione modelli e stato delle sessioni
+
+Quando apri una chat su un PC **online**, l’interfaccia carica i modelli dei provider già connessi sul suo OpenCode. Nel compositore puoi scegliere **Predefinito OpenCode** oppure un modello specifico. La scelta vale per **quel messaggio** e viene azzerata passando a un’altra chat; non modifica la configurazione globale di OpenCode e non viene persistita nel database.
+
+Il connettore legge `/provider`, ma invia al browser esclusivamente `providerID`, `modelID` e nomi pubblici: **mai token, chiavi o opzioni di autenticazione**. Il modello è verificato di nuovo sul PC prima del prompt. Se il provider non è collegato, la richiesta viene rifiutata. Un modello presente nell’elenco non garantisce che il provider ne consenta l’uso o che non generi costi.
+
+Nella barra superiore della chat trovi il pulsante **Stato OpenCode**: restituisce `busy`, `idle`, `retry` o `unknown` e conta le operazioni pendenti salvate dal server. Uno stato `idle` **non** garantisce che un job in stato incerto possa essere ritentato senza duplicazioni: in quel caso è necessario verificare/sincronizzare o interrompere.
+
+Nuove API protette: `GET /api/devices/:id/models`, `GET /api/chats/:id/status`. L’utente può consultare solo i PC e le chat di sua proprietà.
+
+**Test locali v0.5:** `npm test` (11 test con mock); per la build reale `npm install` e `npm run build` su una macchina con accesso al registro npm. Test su OpenCode e MySQL reali ancora necessari.
 
 ## Novità v0.4 — connettore desktop Windows
 

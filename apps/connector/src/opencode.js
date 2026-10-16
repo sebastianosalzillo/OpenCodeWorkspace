@@ -23,7 +23,11 @@ export class LocalOpenCode {
     this.done=new Set();
     this.finishing=new Set();
     this.busySeen=new Set();
+    this.recovering=new Set();
+    this.recoverNotified=new Set();
     this.pollGenerations=new Map();
+    this.baselines=new Map();
+    this.aborting=new Set();
     this.pollIntervalMs=3000;
   }
   auth(){return 'Basic '+Buffer.from(`${this.username}:${this.password}`).toString('base64');}
@@ -85,7 +89,11 @@ export class LocalOpenCode {
       this.sessionToChat.delete(p.sessionId);
       this.done.delete(p.sessionId);
       this.busySeen.delete(p.sessionId);
+      this.recovering.delete(p.sessionId);
+      this.recoverNotified.delete(p.sessionId);
       this.pollGenerations.delete(p.sessionId);
+      this.baselines.delete(p.sessionId);
+      this.aborting.delete(p.sessionId);
       return {ok:true};
     }
     if(method==='status'){
@@ -101,12 +109,14 @@ export class LocalOpenCode {
       // Non interpretare una vecchia risposta assistant come esito del job
       // pendente: senza una correlazione certa la consegna resta irrisolta.
       const completed=false;
+      this.recovering.add(p.sessionId);
+      this.recoverNotified.delete(p.sessionId);
       this.emit({type:'messages',chatId:p.chatId,sessionId:p.sessionId,messages,done:completed});
       if(busy){
         this.busySeen.add(p.sessionId);
-        this.pollUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Recovery polling:',err.message));
+        this.pollRecoveryUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Recovery polling:',err.message));
       }
-      return {running:busy,completed,unresolved:!busy&&!completed};
+      return {running:busy,completed,unresolved:!busy};
     }
     if(method==='prompt'){
       if(typeof p.text!=='string'||!p.text.trim()||p.text.length>12000)throw new Error('Prompt non valido');
@@ -125,12 +135,28 @@ export class LocalOpenCode {
       const generation=(this.pollGenerations.get(p.sessionId)||0)+1;
       this.pollGenerations.set(p.sessionId,generation);
       this.done.delete(p.sessionId);
+      this.baselines.set(p.sessionId,baseline);
       this.busySeen.delete(p.sessionId);
+      this.recovering.delete(p.sessionId);
+      this.recoverNotified.delete(p.sessionId);
       await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}],...(model?{model}:{})});
       this.pollUntilIdle(p.sessionId,p.chatId,baseline,generation).catch(err=>console.error('Fallback sync:',err.message));
       return {accepted:true};
     }
-    if(method==='abort'){await this.call(`/session/${id}/abort`,'POST');this.pollGenerations.delete(p.sessionId);await this.sync(p.sessionId,p.chatId,true);return {ok:true};}
+    if(method==='abort'){
+      this.aborting.add(p.sessionId);
+      try {
+        await this.call(`/session/${id}/abort`,'POST');
+        this.pollGenerations.delete(p.sessionId);
+        this.baselines.delete(p.sessionId);
+        this.recovering.delete(p.sessionId);
+        this.recoverNotified.delete(p.sessionId);
+        this.done.add(p.sessionId); // ignora eventi idle tardivi dell'operazione abortita
+        // Il backend marca il job 'interrupted': non dichiararlo completato via sync.
+        await this.sync(p.sessionId,p.chatId,false);
+        return {ok:true};
+      }finally { this.aborting.delete(p.sessionId); }
+    }
     if(method==='sync'){await this.sync(p.sessionId,p.chatId,false);return {ok:true};}
     if(method==='permission-reply'){
       if(!['once','reject'].includes(p.decision))throw new Error('Scelta permesso non valida');
@@ -150,13 +176,47 @@ export class LocalOpenCode {
     this.emit({type:'messages',chatId,sessionId,messages,done});
   }
   async finish(sessionId){
+    if(this.aborting.has(sessionId))return;
+    if(this.recovering.has(sessionId)){
+      await this.notifyUnresolved(sessionId);
+      return;
+    }
     if(this.done.has(sessionId)||this.finishing.has(sessionId))return;
     this.finishing.add(sessionId);
     try{
       const chatId=this.sessionToChat.get(sessionId);
-      if(chatId)await this.sync(sessionId,chatId,true);
+      if(!chatId)return;
+      const baseline=this.baselines.get(sessionId);
+      if(baseline){
+        // Un evento idle vecchio non può chiudere il prompt corrente.
+        const messages=await this.call(`/session/${encodeURIComponent(sessionId)}/message`);
+        const hasNewAnswer=Array.isArray(messages)&&messages.some(m=>
+          m.info?.role==='assistant' && m.info?.id && !baseline.has(m.info.id) && m.info?.time?.completed);
+        if(!hasNewAnswer)return;
+      }
+      await this.sync(sessionId,chatId,true);
       this.done.add(sessionId);
+      this.baselines.delete(sessionId);
     }finally{this.finishing.delete(sessionId);}
+  }
+  async notifyUnresolved(sessionId){
+    if(this.recoverNotified.has(sessionId))return;
+    const chatId=this.sessionToChat.get(sessionId);
+    if(!chatId)return;
+    this.recoverNotified.add(sessionId);
+    await this.sync(sessionId,chatId,false);
+    this.emit({type:'event',chatId,sessionId,event:{type:'workspace.recovery',properties:{state:'unresolved'}}});
+  }
+  async pollRecoveryUntilIdle(sessionId,chatId){
+    // Dopo riavvio non c'è una baseline affidabile: mai auto-completare un job storico.
+    for(let attempt=0;attempt<120 && this.recovering.has(sessionId);attempt++){
+      await new Promise(r=>setTimeout(r,this.pollIntervalMs));
+      try{
+        const statuses=await this.call('/session/status');
+        const status=statuses?.[sessionId]?.type;
+        if(status==='idle'||!status){await this.notifyUnresolved(sessionId);return;}
+      }catch(err){if(attempt%10===0)console.error('Polling recovery:',err.message);}
+    }
   }
   async pollUntilIdle(sessionId,chatId,baseline=null,generation=null){
     // Recupero di sicurezza quando una notifica SSE si perde.

@@ -37,3 +37,14 @@ I test unitari e l'API simulata sono eseguiti da `npm test`. Il build UI da `npm
 6. Scollega il PC: le API modelli/stato devono rispondere con errore e non esporre credenziali.
 7. Accedi con il secondo utente: non può richiedere modelli o stati di PC/chat altrui.
 8. Ricorda che uno stato `idle` senza riscontro del job non deve provocare un reinvio automatico.
+
+## v0.6 — verifica strumenti e disconnessione
+
+1. In una chat autorizzata chiedi a OpenCode di eseguire `npm --version` in una cartella di prova. La scheda `bash` deve mostrare comando, stato ed eventuale output.
+2. Richiedi una modifica non distruttiva a un file di prova. Verifica la visualizzazione del percorso e della patch, quando OpenCode fornisce quei campi.
+3. Aggiorna la pagina dopo il completamento: schede e messaggi devono riapparire dalla cronologia salvata.
+4. Durante un'operazione, interrompi la connessione del connettore e riattivala. Il prompt **non** deve essere ritrasmesso automaticamente. Se l'esito è incerto, la chat deve segnalarlo.
+5. Se la sessione è ancora `busy`, il pulsante di sblocco manuale deve rifiutare la richiesta. Quando è `idle`, dopo aver controllato i risultati, il proprietario può chiudere il job come **interrotto/non verificato**.
+6. Due utenti, su due PC separati: un utente non deve poter vedere né aggiornare le chat o i job dell'altro, anche alterando l'ID nell'URL.
+
+**Nota:** i test automatici simulano OpenCode. Non equivalgono a una verifica su dispositivo reale e non garantiscono isolamento completo dei processi Windows.
