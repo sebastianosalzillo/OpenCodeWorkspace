@@ -31,6 +31,7 @@ export function rpc(deviceId,method,payload={},timeoutMs=20000) {
     const id=randomUUID();
     const timer=setTimeout(()=>{pending.delete(id);reject(new Error('Operazione scaduta: verificare lo stato del PC prima di riprovare'));},timeoutMs);
     pending.set(id,{deviceId,resolve,reject,timer});
+    pending.get(id).socket=ws;
     ws.send(JSON.stringify({type:'rpc',id,method,payload}),err=>{
       if(err){clearTimeout(timer);pending.delete(id);reject(err);}
     });
@@ -56,12 +57,13 @@ export function attachAgentSockets(server) {
     ws.isAlive=true;
     ws.on('pong',()=>{ws.isAlive=true;});
     rows('UPDATE computers SET last_seen=NOW() WHERE id=?',[pc.id]).catch(console.error);
+    Promise.resolve().then(()=>callbacks.onDeviceConnect?.(pc)).catch(err=>console.error('Agent resume:',err.message));
     ws.on('message',async(raw)=>{
       try{
         const m=JSON.parse(raw.toString());
         if(m.type==='result'){
           const x=pending.get(m.id);
-          if(!x || x.deviceId!==pc.id)return;
+          if(!x || x.deviceId!==pc.id || x.socket!==ws)return;
           clearTimeout(x.timer);pending.delete(m.id);
           m.ok ? x.resolve(m.data) : x.reject(new Error(String(m.error||'Errore connettore').slice(0,500)));
         } else if(m.type==='event') await callbacks.onEvent?.(pc,m);
@@ -69,8 +71,11 @@ export function attachAgentSockets(server) {
       }catch(err){console.error('Agent message:',err.message);}
     });
     ws.on('close',()=>{
-      if(devices.get(pc.id)===ws)devices.delete(pc.id);
-      for(const [id,x] of pending){if(x.deviceId===pc.id){clearTimeout(x.timer);pending.delete(id);x.reject(new Error('PC scollegato'));}}
+      if(devices.get(pc.id)===ws){
+        devices.delete(pc.id);
+        Promise.resolve().then(()=>callbacks.onDeviceDisconnect?.(pc)).catch(err=>console.error('Agent disconnect:',err.message));
+      }
+      for(const [id,x] of pending){if(x.socket===ws){clearTimeout(x.timer);pending.delete(id);x.reject(new Error('PC scollegato'));}}
     });
   });
   const heartbeat=setInterval(()=>{

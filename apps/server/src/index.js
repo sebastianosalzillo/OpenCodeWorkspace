@@ -104,7 +104,8 @@ api.get('/chats/:id/messages',requireUser,route(async(req,res)=>{
   if(!chat)return res.status(404).json({error:'Chat non trovata'});
   const messages=await rows('SELECT id,source_id,role,content,parts_json,created_at FROM messages WHERE chat_id=? ORDER BY seq',[chat.id]);
   const permissions=await rows("SELECT request_id,details_json FROM permission_requests WHERE chat_id=? AND decision='pending'",[chat.id]);
-  res.json({chat,messages,permissions});
+  const jobs=await rows("SELECT id,status,created_at,updated_at FROM jobs WHERE chat_id=? AND status IN ('queued','running') ORDER BY created_at DESC",[chat.id]);
+  res.json({chat,messages,permissions,jobs});
 }));
 api.get('/chats/:id/stream',requireUser,route(async(req,res)=>{
   const chat=await ownedChat(req.user,req.params.id);
@@ -119,7 +120,15 @@ api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
   if(!text||text.length>12000)return res.status(400).json({error:'Messaggio vuoto o troppo lungo'});
   if(!isOnline(chat.computer_id))return res.status(409).json({error:'PC offline'});
   if(active.has(chat.id))return res.status(409).json({error:'Operazione già in corso in questa chat'});
+  // Imposta il lock PRIMA della lettura MySQL: due richieste concorrenti non possono passare assieme.
   active.add(chat.id);
+  let running;
+  try{running=await one("SELECT id FROM jobs WHERE chat_id=? AND status IN ('queued','running') LIMIT 1",[chat.id]);}
+  catch(err){active.delete(chat.id);throw err;}
+  if(running){
+    active.delete(chat.id);
+    return res.status(409).json({error:'Operazione non conclusa. Se il PC è stato scollegato, sincronizza o interrompi prima di riprovare.'});
+  }
   const jobId=randomUUID(), msgId=randomUUID();
   try{
     await rows('INSERT INTO jobs(id,chat_id,status) VALUES (?,?,?)',[jobId,chat.id,'queued']);
@@ -127,7 +136,8 @@ api.post('/chats/:id/messages',requireUser,route(async(req,res)=>{
     await rows('UPDATE chats SET updated_at=NOW() WHERE id=?',[chat.id]);
     publish(chat.id,{type:'message',message:{id:msgId,role:'user',content:text}});
     await rpc(chat.computer_id,'prompt',{chatId:chat.id,sessionId:chat.session_id,text,jobId},25000);
-    await rows("UPDATE jobs SET status='running' WHERE id=?",[jobId]);
+    // L'evento session.idle può arrivare prima del riscontro RPC: non riaprire un job già terminato.
+    await rows("UPDATE jobs SET status='running' WHERE id=? AND status='queued'",[jobId]);
     res.status(202).json({jobId});
   }catch(err){
     await rows('UPDATE jobs SET status=?,error_text=? WHERE id=?',['failed',err.message,jobId]);
@@ -163,6 +173,30 @@ api.post('/chats/:id/permissions/:requestId',requireUser,route(async(req,res)=>{
 }));
 
 setCallbacks({
+  async onDeviceConnect(pc){
+    // Ricostruzione dopo riavvio del connettore: la mappa sessione/chat è solo in memoria locale.
+    const sessions=await rows('SELECT id AS chatId,session_id AS sessionId FROM chats WHERE computer_id=? AND session_id IS NOT NULL',[pc.id]);
+    for(let i=0;i<sessions.length;i+=100){
+      const batch=sessions.slice(i,i+100);
+      await rpc(pc.id,'restore-sessions',{sessions:batch},20000);
+    }
+    // Ricostruisci i job attivi prima di autorizzare nuovi messaggi nella stessa chat.
+    const pendingChats=await rows(`SELECT DISTINCT ch.id AS chatId,ch.session_id AS sessionId
+      FROM chats ch JOIN jobs j ON j.chat_id=ch.id
+      WHERE ch.computer_id=? AND j.status IN ('queued','running')`,[pc.id]);
+    const pendingIds=new Set(pendingChats.map(x=>x.chatId));
+    for(const c of pendingChats){
+      active.add(c.chatId);
+      try{await rpc(pc.id,'recover',{chatId:c.chatId,sessionId:c.sessionId},15000);}
+      catch(err){console.warn('Recovery fallito',c.chatId,err.message);}
+    }
+    // Recupera risposte completate mentre il PC era offline, senza ripetere prompt.
+    for(const c of sessions){
+      if(pendingIds.has(c.chatId))continue;
+      try{await rpc(pc.id,'sync',{chatId:c.chatId,sessionId:c.sessionId},15000);}
+      catch(err){console.warn('Sync fallita',c.chatId,err.message);break;}
+    }
+  },
   async onEvent(pc,m){
     const chat=await one('SELECT id FROM chats WHERE id=? AND session_id=? AND computer_id=?',[m.chatId,m.sessionId,pc.id]);
     if(!chat)return;

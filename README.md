@@ -1,4 +1,4 @@
-# OpenCode Workspace — MVP multiutente (v0.1)
+# OpenCode Workspace — MVP multiutente (v0.2)
 
 Piattaforma di chat multiutente con account personali e agenti OpenCode **installati sui PC Windows degli utenti**. Il server centrale autentica gli utenti e salva le chat, mentre un connettore residente su ciascun PC comunica con l'API locale di `opencode serve`.
 
@@ -169,7 +169,11 @@ gh auth login
 .\publish-github.ps1
 ```
 
-Se avviato da una cartella ZIP senza `.git`, lo script clona la repository nella cartella sorella `OpenCodeWorkspace-clone`, copia i sorgenti, conserva `LICENSE`, crea un commit e lo pubblica dopo la tua conferma. Se avviato da un clone Git già associato alla repository, aggiorna il ramo `main` senza cancellare la cronologia. Le `.env` e i token sono esclusi dal `.gitignore`; controlla comunque il contenuto prima del push.
+Lo script collega la cartella alla repository esistente e conserva il file `LICENSE` già presente, se avviato su una cartella di progetto senza repository Git inizializzata. Verifica sempre `git status` prima di confermare il push. Le `.env` e i token dei dispositivi sono esclusi dal `.gitignore`.
+
+## Aggiornamenti v0.2
+
+La versione 0.2 ripristina la mappa di sessioni OpenCode al ricollegamento del PC, recupera i messaggi già presenti senza reinviare prompt, blocca i job concorrenti anche dopo un refresh e permette di revocare un PC dall’interfaccia. Sono stati aggiunti test con un server OpenCode simulato e GitHub Actions. I job incerti richiedono una verifica o un’interruzione manuale. Dettagli in `CHANGELOG.md` e procedura completa in `docs/TEST-PLAN.md`.
 
 ## Roadmap
 

@@ -20,6 +20,9 @@ export class LocalOpenCode {
     this.emit=emit;
     this.sessionToChat=new Map();
     this.done=new Set();
+    this.finishing=new Set();
+    this.busySeen=new Set();
+    this.pollIntervalMs=3000;
   }
   auth(){return 'Basic '+Buffer.from(`${this.username}:${this.password}`).toString('base64');}
   async call(path,method='GET',body){
@@ -49,7 +52,16 @@ export class LocalOpenCode {
   }
   async ready(){const result=await this.call('/global/health');if(!result?.healthy)throw new Error('OpenCode non pronto');}
   async command(method,p){
+    if(method==='restore-sessions'){
+      if(!Array.isArray(p.sessions)||p.sessions.length>100)throw new Error('Batch di sessioni non valido');
+      for(const s of p.sessions){
+        if(typeof s.sessionId!=='string'||s.sessionId.length>180||!s.sessionId || typeof s.chatId!=='string'||s.chatId.length>180||!s.chatId)throw new Error('Sessione da ripristinare non valida');
+      }
+      for(const s of p.sessions)this.sessionToChat.set(s.sessionId,s.chatId);
+      return {restored:p.sessions.length};
+    }
     if(method==='create-session'){
+      if(typeof p.chatId!=='string'||!p.chatId)throw new Error('Chat ID non valido');
       const s=await this.call('/session','POST',{title:String(p.title||'Workspace')});
       this.sessionToChat.set(s.id,p.chatId);
       return {id:s.id};
@@ -57,9 +69,23 @@ export class LocalOpenCode {
     if(!p.sessionId || !p.chatId)throw new Error('Sessione mancante');
     this.sessionToChat.set(p.sessionId,p.chatId);
     const id=encodeURIComponent(p.sessionId);
+    if(method==='recover'){
+      // Al ricollegamento nessun prompt viene inviato una seconda volta.
+      const statuses=await this.call('/session/status');
+      const busy=statuses?.[p.sessionId]?.type==='busy';
+      const messages=await this.call(`/session/${id}/message`);
+      const completed=!busy && Array.isArray(messages) && messages.some(m=>m.info?.role==='assistant' && m.info?.time?.completed);
+      this.emit({type:'messages',chatId:p.chatId,sessionId:p.sessionId,messages,done:completed});
+      if(busy){
+        this.busySeen.add(p.sessionId);
+        this.pollUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Recovery polling:',err.message));
+      }
+      return {running:busy,completed,unresolved:!busy&&!completed};
+    }
     if(method==='prompt'){
       // L'endpoint ritorna subito; l'output arriverà dagli eventi SSE.
       this.done.delete(p.sessionId);
+      this.busySeen.delete(p.sessionId);
       await this.call(`/session/${id}/prompt_async`,'POST',{parts:[{type:'text',text:p.text}]});
       this.pollUntilIdle(p.sessionId,p.chatId).catch(err=>console.error('Fallback sync:',err.message));
       return {accepted:true};
@@ -84,18 +110,24 @@ export class LocalOpenCode {
     this.emit({type:'messages',chatId,sessionId,messages,done});
   }
   async finish(sessionId){
-    if(this.done.has(sessionId))return;
-    this.done.add(sessionId);
-    const chatId=this.sessionToChat.get(sessionId);
-    if(chatId)await this.sync(sessionId,chatId,true);
+    if(this.done.has(sessionId)||this.finishing.has(sessionId))return;
+    this.finishing.add(sessionId);
+    try{
+      const chatId=this.sessionToChat.get(sessionId);
+      if(chatId)await this.sync(sessionId,chatId,true);
+      this.done.add(sessionId);
+    }finally{this.finishing.delete(sessionId);}
   }
   async pollUntilIdle(sessionId,chatId){
     // Recupero di sicurezza quando una notifica SSE si perde.
     for(let attempt=0;attempt<120 && !this.done.has(sessionId);attempt++){
-      await new Promise(r=>setTimeout(r,3000));
+      await new Promise(r=>setTimeout(r,this.pollIntervalMs));
       try{
         const statuses=await this.call('/session/status');
-        if(statuses?.[sessionId]?.type==='idle'){
+        const status=statuses?.[sessionId]?.type;
+        if(status==='busy')this.busySeen.add(sessionId);
+        // L'API può omettere le sessioni inattive: richiedi prima una prova di busy.
+        if(status==='idle'||(this.busySeen.has(sessionId)&&!status)){
           await this.finish(sessionId);break;
         }
       }catch(err){if(attempt%10===0)console.error('Polling OpenCode:',err.message);}

@@ -27,6 +27,7 @@ async function credentials(){
 const device=await credentials();
 if(!/^[0-9a-f]{64}$/.test(device.token))throw new Error('Token dispositivo non valido');
 let socket=null;
+let reconnectTimer=null;
 const openCode=new LocalOpenCode(packet=>{
   if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(packet));
 });
@@ -37,23 +38,26 @@ console.log('OpenCode locale pronto:',openCode.base);
 
 async function connect(){
   const url=base.replace(/^http/,'ws')+'/agent';
-  socket=new WebSocket(url,{headers:{Authorization:`Bearer ${device.token}`}});
-  socket.on('open',()=>console.log('Connettore collegato al server Workspace'));
-  socket.on('message',async(buffer)=>{
+  const ws=new WebSocket(url,{headers:{Authorization:`Bearer ${device.token}`}});
+  socket=ws;
+  ws.on('open',()=>console.log('Connettore collegato al server Workspace'));
+  ws.on('message',async(buffer)=>{
     let m;
     try{m=JSON.parse(buffer.toString());}catch{return;}
     if(m.type!=='rpc'||!m.id)return;
     try{
       const data=await openCode.command(m.method,m.payload||{});
-      if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'result',id:m.id,ok:true,data}));
+      if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'result',id:m.id,ok:true,data}));
     }catch(e){
-      if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'result',id:m.id,ok:false,error:e.message}));
+      if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'result',id:m.id,ok:false,error:e.message}));
     }
   });
-  socket.on('error',e=>console.error('WebSocket:',e.message));
-  socket.on('close',()=>{
+  ws.on('error',e=>console.error('WebSocket:',e.message));
+  ws.on('close',()=>{
+    if(socket!==ws)return;
+    socket=null;
     console.log('Server scollegato: ritento tra 5 secondi');
-    setTimeout(connect,5000);
+    if(!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect();},5000);
   });
 }
 connect();
